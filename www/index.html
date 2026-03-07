@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenBlock Web</title>
+    <style>
+        body {
+            background-color: #4D97FF;
+        }
+
+        .splash {
+            color: white;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-size: xx-large;
+            font-weight: bolder;
+            margin: 0;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+    <!-- Electron shim: provides browser-compatible stubs for ipcRenderer, fs, path, etc. -->
+    <script src="electron-shim.js?v=8"></script>
+</head>
+
+<body>
+    <div id="app">
+        <p class="splash">TubitBlock Web is loading...</p>
+    </div>
+    <script src="renderer.js"></script>
+</body>
+
+</html>

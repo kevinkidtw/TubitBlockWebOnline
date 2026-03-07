@@ -1,0 +1,16 @@
+.DS_Store
+*.log
+*.7z
+.tubitblockData/
+tubitblock-link/node_modules/
+tubitblock-link/.tubitblockData/
+tubitblock-link/tmp/
+tubitblock-link/tools/Arduino/hardware/
+tubitblock-link/tools/Arduino/tools/
+tubitblock-link/tools/Arduino/packages/esp32/tools/esp-rv32/
+tubitblock-link/tools/Arduino/packages/esp32/tools/esp-x32/
+tubitblock-link/tools/Arduino/packages/esp32/tools/esptool_py/
+tubitblock-link/tools/Arduino/packages/esp32/tools/openocd-esp32/
+tubitblock-link/tools/Arduino/packages/esp32/tools/xtensa-esp-elf-gdb/
+tubitblock-link/tools/Arduino/packages/esp32/tools/riscv32-esp-elf-gdb/
+*.pyc
