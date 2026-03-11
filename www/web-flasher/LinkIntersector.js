@@ -11,9 +11,9 @@
     const OriginalWebSocket = window.WebSocket;
 
     // --- 編譯伺服器設定 ---
-    // 優先使用遠端伺服器，若未設定則回退到本地
+    // 優先使用遠端伺服器 (Render)
     const COMPILE_SERVER_URL = window.TUBITBLOCK_COMPILE_SERVER
-        || 'http://127.0.0.1:3000/compile';  // Phase 2 的 compiler-server
+        || 'https://tubitblock-compiler.onrender.com/compile';
 
     // --- 編譯快取 (Phase 4) ---
     let cachedArtifacts = null;   // Base64 artifacts from last successful compile
