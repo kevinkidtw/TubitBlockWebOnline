@@ -24,19 +24,18 @@
     </style>
     <!-- Electron shim: provides browser-compatible stubs for ipcRenderer, fs, path, etc. -->
     <script src="electron-shim.js?v=8"></script>
-</head>
-
-<body>
-    <div id="app">
-        <p class="splash">TubitBlock Web is loading...</p>
-    </div>
     <!-- Web Serial Flasher 模組 -->
     <script src="web-flasher/SerialManager.js"></script>
     <script src="web-flasher/Stk500WebFlasher.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
     <script src="web-flasher/Esp32WebFlasher.js"></script>
     <script src="web-flasher/LinkIntersector.js"></script>
+</head>
 
+<body>
+    <div id="app">
+        <p class="splash">TubitBlock Web is loading...</p>
+    </div>
     <script src="renderer.js"></script>
 
     <div id="stk500-test-ui"
@@ -111,7 +110,7 @@
             console.log(msg);
         };
 
-        const serialManager = new SerialManager(logger);
+        window.serialManager = new SerialManager(logger);
 
         // Arduino 測試
         document.getElementById('test-arduino-blink').addEventListener('click', async () => {
