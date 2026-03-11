@@ -182,14 +182,14 @@
         // 嘗試從 GUI 的 Ace editor 取得程式碼，必須逐行取得以保留換行符號
         const aceLines = document.querySelectorAll('.ace_line');
         if (aceLines.length > 0) {
-            // 將所有行合併，使用換行符號隔開
-            return Array.from(aceLines).map(l => l.textContent).join('\n');
+            // 替換掉 non-breaking space (\xA0) 為一般空白，否則 C++ 編譯會報錯 "extended character..."
+            return Array.from(aceLines).map(l => l.textContent.replace(/\u00A0/g, ' ')).join('\n');
         }
         
         // 如果沒有 Ace editor，退路：嘗試取得 Monaco editor 內容
         const monacoLines = document.querySelectorAll('.view-line');
         if (monacoLines.length > 0) {
-            return Array.from(monacoLines).map(l => l.textContent).join('\n');
+            return Array.from(monacoLines).map(l => l.textContent.replace(/\u00A0/g, ' ')).join('\n');
         }
         
         // 再退一步，如果只有純 text layer (雖然這會失去換行，但留作備用)
