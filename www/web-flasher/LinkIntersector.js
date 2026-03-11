@@ -11,9 +11,9 @@
     const OriginalWebSocket = window.WebSocket;
 
     // --- 編譯伺服器設定 ---
-    // 優先使用本地 Mac 伺服器 (Option C)
+    // 優先使用遠端伺服器 (Render)
     const COMPILE_SERVER_URL = window.TUBITBLOCK_COMPILE_SERVER
-        || 'http://192.168.68.104:3000/compile';
+        || 'https://tubitblock-compiler.onrender.com/compile';
 
     // --- 編譯快取 (Phase 4) ---
     let cachedArtifacts = null;   // Base64 artifacts from last successful compile
