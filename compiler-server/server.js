@@ -3,17 +3,12 @@
  *
  * 接收前端 POST 的 Arduino 原始碼，呼叫 arduino-cli 進行編譯，
  * 將產生的 .bin / .hex 檔案以 Base64 回傳給前端。
- *
- * 設計原則：
- * - 每個編譯請求使用獨立的 UUID 暫存資料夾，確保併發安全。
- * - 編譯完畢（無論成功或失敗）後自動清除暫存資料夾。
- * - 支援 CORS，允許任何前端來源存取。
  */
 
 const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const { execFile } = require('child_process');
+const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -26,14 +21,26 @@ const ARDUINO_CLI = process.env.ARDUINO_CLI_PATH || 'arduino-cli';
 
 // --- Middleware ---
 app.use(cors());
-app.use(express.json({ limit: '5mb' })); // Arduino 程式碼通常不會太大
+app.use(express.json({ limit: '5mb' }));
 
-// --- Health Check ---
-app.get('/', (req, res) => {
+// --- Health Check with diagnostics ---
+app.get('/', async (req, res) => {
+    const cliVersion = await new Promise(resolve => {
+        exec(`${ARDUINO_CLI} version 2>&1`, (err, stdout) => {
+            resolve(err ? `ERROR: ${err.message}` : stdout.trim());
+        });
+    });
+    const boards = await new Promise(resolve => {
+        exec(`${ARDUINO_CLI} core list 2>&1`, (err, stdout) => {
+            resolve(err ? `ERROR: ${err.message}` : stdout.trim());
+        });
+    });
     res.json({
         service: 'tubitblock-compiler-server',
         status: 'running',
-        version: '1.0.0'
+        version: '1.1.0',
+        arduino_cli: cliVersion,
+        installed_cores: boards
     });
 });
 
@@ -41,13 +48,10 @@ app.get('/', (req, res) => {
 app.post('/compile', async (req, res) => {
     const { code, board, fqbn, libraries } = req.body;
 
-    // 支援多種輸入格式：
-    // 格式 A (簡潔版): { code: "...", board: "esp32:esp32:esp32" }
-    // 格式 B (GUI 相容): { message: "base64...", config: { fqbn: "..." }, encoding: "base64" }
     let sourceCode = code;
     let boardFqbn = fqbn || board;
 
-    // 相容 LinkIntersector 的 params 格式
+    // 相容 LinkIntersector 的 params 格式 (message+config+encoding)
     if (!sourceCode && req.body.message) {
         const encoding = req.body.encoding || 'utf8';
         sourceCode = Buffer.from(req.body.message, encoding).toString();
@@ -56,75 +60,54 @@ app.post('/compile', async (req, res) => {
         boardFqbn = req.body.config.fqbn;
     }
 
-    // 參數驗證
     if (!sourceCode) {
-        return res.status(400).json({
-            success: false,
-            error: '缺少必要參數: code (原始碼)'
-        });
+        return res.status(400).json({ success: false, error: '缺少必要參數: code (原始碼)' });
     }
     if (!boardFqbn) {
-        return res.status(400).json({
-            success: false,
-            error: '缺少必要參數: board 或 fqbn (硬體版型)'
-        });
+        return res.status(400).json({ success: false, error: '缺少必要參數: board 或 fqbn (硬體版型)' });
     }
 
-    // 建立獨立的暫存資料夾 (UUID)
     const buildId = uuidv4();
     const tmpDir = path.join(os.tmpdir(), 'tubitblock-compile', buildId);
     const sketchDir = path.join(tmpDir, 'sketch');
     const buildDir = path.join(tmpDir, 'build');
 
     console.log(`[Compile] Build ${buildId} started for board: ${boardFqbn}`);
+    console.log(`[Compile] Code length: ${sourceCode.length} chars`);
+    console.log(`[Compile] Code preview: ${sourceCode.slice(0, 300).replace(/\n/g, '\\n')}`);
 
     try {
-        // 1. 建立暫存目錄
         fs.mkdirSync(sketchDir, { recursive: true });
         fs.mkdirSync(buildDir, { recursive: true });
 
-        // 2. 寫入 .ino 檔案（檔名必須與資料夾同名）
         const sketchFile = path.join(sketchDir, 'sketch.ino');
         fs.writeFileSync(sketchFile, sourceCode, 'utf8');
 
-        // 3. 組裝 arduino-cli 編譯指令
-        const args = [
-            'compile',
-            '--fqbn', boardFqbn,
-            '--build-path', buildDir,
-            sketchDir
-        ];
+        // 使用 shell exec (而非 execFile) 以正確捕捉 stderr+stdout
+        const librariesFlag = libraries ? `--libraries "${libraries}"` : '';
+        const cmd = `${ARDUINO_CLI} compile --fqbn ${boardFqbn} ${librariesFlag} --build-path "${buildDir}" "${sketchDir}" 2>&1`;
 
-        // 如果有指定額外函式庫路徑
-        if (libraries) {
-            args.push('--libraries', libraries);
-        }
+        console.log(`[Compile] Running: ${cmd}`);
 
-        console.log(`[Compile] Running: ${ARDUINO_CLI} ${args.join(' ')}`);
-
-        // 4. 執行 arduino-cli compile
         const result = await new Promise((resolve, reject) => {
-            execFile(ARDUINO_CLI, args, {
-                timeout: 120000, // 2 分鐘超時
-                maxBuffer: 10 * 1024 * 1024 // 10MB buffer
-            }, (error, stdout, stderr) => {
+            exec(cmd, {
+                timeout: 120000,
+                maxBuffer: 10 * 1024 * 1024
+            }, (error, stdout) => {
+                // 使用 2>&1 合併 stderr 到 stdout，所以只需讀 stdout
+                const output = stdout || '';
                 if (error) {
-                    reject({
-                        exitCode: error.code,
-                        stdout: stdout,
-                        stderr: stderr,
-                        message: error.message
-                    });
+                    reject({ exitCode: error.code, output, message: error.message });
                 } else {
-                    resolve({ stdout, stderr });
+                    resolve({ output });
                 }
             });
         });
 
         console.log(`[Compile] Build ${buildId} succeeded`);
-        if (result.stdout) console.log('[Compile] stdout:', result.stdout.slice(0, 500));
+        console.log('[Compile] output:', result.output.slice(0, 500));
 
-        // 5. 收集編譯產物 (.bin, .hex, .elf)
+        // 收集編譯產物 (.bin, .hex, .elf)
         const artifacts = {};
         if (fs.existsSync(buildDir)) {
             const files = fs.readdirSync(buildDir);
@@ -142,68 +125,56 @@ app.post('/compile', async (req, res) => {
 
         if (Object.keys(artifacts).length === 0) {
             throw {
-                stderr: '編譯成功但找不到任何產物檔案 (.bin/.hex)。請確認 board 設定正確。',
-                stdout: result.stdout
+                output: `${result.output}\n⚠️ 編譯成功但找不到任何 .bin/.hex 產物，請確認 board FQBN 正確。`
             };
         }
 
-        // 6. 回傳成功結果
         res.json({
             success: true,
-            buildId: buildId,
+            buildId,
             board: boardFqbn,
-            artifacts: artifacts,
-            stdout: result.stdout || '',
+            artifacts,
+            stdout: result.output || '',
             artifactCount: Object.keys(artifacts).length
         });
 
     } catch (err) {
-        console.error(`[Compile] Build ${buildId} FAILED:`, err.stderr || err.message);
-        console.error(`[Compile] Failed Source Code length:`, sourceCode.length);
-        console.error(`[Compile] First 300 chars:`, sourceCode.slice(0, 300));
+        const errOutput = err.output || err.message || '未知編譯錯誤';
+        console.error(`[Compile] Build ${buildId} FAILED`);
+        console.error(`[Compile] Full error output:\n${errOutput.slice(0, 2000)}`);
 
-        // 回傳編譯錯誤（包含 arduino-cli 的 stderr）
         res.status(400).json({
             success: false,
-            buildId: buildId,
-            error: err.stderr || err.message || '未知的編譯錯誤',
-            stdout: err.stdout || ''
+            buildId,
+            error: errOutput
         });
 
     } finally {
-        // 7. 清除暫存資料夾
-        try {
-            fs.rmSync(tmpDir, { recursive: true, force: true });
-            console.log(`[Compile] Cleaned up temp dir for build ${buildId}`);
-        } catch (cleanupErr) {
-            console.warn(`[Compile] Failed to clean temp dir: ${cleanupErr.message}`);
-        }
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
     }
 });
 
-// --- 查詢已安裝的 Board ---
+// --- 列出已安裝的 Board ---
 app.get('/boards', async (req, res) => {
-    try {
-        const result = await new Promise((resolve, reject) => {
-            execFile(ARDUINO_CLI, ['board', 'listall', '--format', 'json'], {
-                timeout: 30000
-            }, (error, stdout, stderr) => {
-                if (error) reject({ stderr, message: error.message });
-                else resolve(JSON.parse(stdout));
-            });
-        });
-        res.json({ success: true, boards: result });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.stderr || err.message });
-    }
+    exec(`${ARDUINO_CLI} board listall --format json 2>&1`, { timeout: 30000 }, (err, stdout) => {
+        if (err) return res.status(500).json({ success: false, error: stdout });
+        try { res.json({ success: true, boards: JSON.parse(stdout) }); }
+        catch (e) { res.status(500).json({ success: false, error: stdout }); }
+    });
 });
 
 // --- 啟動伺服器 ---
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n==============================================`);
-    console.log(`  TubitBlock Compiler Server`);
+    console.log(`  TubitBlock Compiler Server v1.1`);
     console.log(`  Listening on http://0.0.0.0:${PORT}`);
-    console.log(`  POST /compile  - 編譯 Arduino 程式碼`);
-    console.log(`  GET  /boards   - 列出已安裝的開發板`);
     console.log(`==============================================\n`);
+
+    // 啟動時診斷
+    exec(`${ARDUINO_CLI} version 2>&1`, (err, stdout) => {
+        console.log('[Boot] arduino-cli:', err ? `NOT FOUND: ${err.message}` : stdout.trim());
+    });
+    exec(`${ARDUINO_CLI} core list 2>&1`, (err, stdout) => {
+        console.log('[Boot] Installed cores:\n', err ? `ERROR: ${err.message}` : stdout);
+    });
 });
