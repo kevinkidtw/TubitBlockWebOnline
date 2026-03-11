@@ -9,7 +9,16 @@
 
 (function () {
     const OriginalWebSocket = window.WebSocket;
-    let cachedCompilationResult = null; // Phase 4 快取
+
+    // --- 編譯伺服器設定 ---
+    // 優先使用遠端伺服器，若未設定則回退到本地
+    const COMPILE_SERVER_URL = window.TUBITBLOCK_COMPILE_SERVER
+        || 'http://127.0.0.1:3000/compile';  // Phase 2 的 compiler-server
+
+    // --- 編譯快取 (Phase 4) ---
+    let cachedArtifacts = null;   // Base64 artifacts from last successful compile
+    let cachedCodeHash = null;    // 用來判斷程式碼是否已變更
+    let isCompiling = false;      // 防止重複點擊
     
     // --- 階段 1：DOM 監聽與「編譯」按鈕注入 ---
     function injectCompileButton() {
@@ -31,12 +40,11 @@
             compileButton.style.backgroundColor = '#155bb5';
             compileButton.style.marginRight = '10px';
             
-            // 點擊事件：暫時先用 alert 測試，後續實作 handleCompileOnly
+            // 點擊事件：Phase 3 - 連接到線上編譯伺服器
             compileButton.addEventListener('click', (e) => {
-                e.stopPropagation(); // 避免觸發原本的父節點事件
+                e.stopPropagation();
                 console.log('[Intersector] Compile button clicked!');
-                alert('準備實作線上編譯！');
-                // TODO: 實作向本地 Server (稍後改為遠端) 請求 /compile
+                handleCompileOnly(compileButton);
             });
 
             // 插入到上傳按鈕的前面
@@ -157,6 +165,103 @@
         }
     }
 
+    // --- Phase 3: handleCompileOnly ---
+    // 簡易的程式碼 hash（用來判斷是否需要重新編譯）
+    function simpleHash(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const chr = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + chr;
+            hash |= 0;
+        }
+        return hash.toString(36);
+    }
+
+    // 從 GUI 取得當前的程式碼與 board 設定
+    function getCurrentCodeFromGUI() {
+        // 嘗試從 GUI 的 code editor 取得程式碼
+        const codeEditor = document.querySelector('.ace_text-layer');
+        if (codeEditor) {
+            return codeEditor.textContent || '';
+        }
+        // 退路：嘗試取得 Monaco editor 或其他編輯器的內容
+        const monacoLines = document.querySelectorAll('.view-line');
+        if (monacoLines.length > 0) {
+            return Array.from(monacoLines).map(l => l.textContent).join('\n');
+        }
+        return null;
+    }
+
+    async function handleCompileOnly(buttonElement) {
+        if (isCompiling) {
+            console.log('[Intersector] 正在編譯中，請稍候...');
+            return;
+        }
+        isCompiling = true;
+
+        const originalText = buttonElement.querySelector('span')?.textContent || '編譯 (線上)';
+        const textSpan = buttonElement.querySelector('span');
+
+        try {
+            // 更新按鈕狀態
+            if (textSpan) textSpan.textContent = '⏳ 編譯中...';
+            buttonElement.style.opacity = '0.7';
+            buttonElement.style.pointerEvents = 'none';
+
+            // 取得當前程式碼
+            const currentCode = getCurrentCodeFromGUI();
+            if (!currentCode) {
+                throw new Error('無法從編輯器取得程式碼。請確認已選擇裝置並切換到程式碼檢視。');
+            }
+
+            const codeHash = simpleHash(currentCode);
+            
+            // 如果程式碼沒有變更且已有快取，直接跳過
+            if (cachedArtifacts && cachedCodeHash === codeHash) {
+                console.log('[Intersector] 程式碼未變更，使用快取的編譯結果');
+                if (textSpan) textSpan.textContent = '✅ 已編譯';
+                setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 2000);
+                return;
+            }
+
+            console.log(`[Intersector] 發送編譯請求到 ${COMPILE_SERVER_URL}`);
+            
+            const response = await fetch(COMPILE_SERVER_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    code: currentCode,
+                    board: 'esp32:esp32:esp32'  // TODO: 從 GUI 動態取得
+                })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || '編譯失敗');
+            }
+
+            // 儲存快取
+            cachedArtifacts = result.artifacts;
+            cachedCodeHash = codeHash;
+
+            console.log(`[Intersector] 編譯成功！取得 ${result.artifactCount || Object.keys(result.artifacts).length} 個檔案`);
+            if (textSpan) textSpan.textContent = '✅ 編譯成功';
+            setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 3000);
+
+        } catch (err) {
+            console.error('[Intersector] 編譯失敗:', err);
+            if (textSpan) textSpan.textContent = '❌ 編譯失敗';
+            alert(`編譯失敗：${err.message}`);
+            setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 3000);
+        } finally {
+            isCompiling = false;
+            buttonElement.style.opacity = '1';
+            buttonElement.style.pointerEvents = 'auto';
+        }
+    }
+
+    // --- Phase 4: 改寫 handleInterceptedUpload ---
     async function handleInterceptedUpload(ws, originalRequest) {
         const { id, params } = originalRequest;
         const logger = (msg) => {
@@ -169,31 +274,51 @@
         };
 
         try {
-            logger("正在發起網頁編譯 (POST /compile)...");
-            
-            const response = await fetch('http://127.0.0.1:20111/compile', {
-                method: 'POST',
-                body: JSON.stringify(params), 
-                headers: { 'Content-Type': 'application/json' }
-            });
+            let artifacts;
 
-            if (!response.ok) {
-                const errData = await response.json();
-                console.error('[Intersector] Compile server error response:', errData);
-                throw new Error(errData.error || "編譯伺服器錯誤");
-            }
-
-            const result = await response.json();
-            logger("編譯成功！正在處理 Binary 檔案...");
-
-            // 判斷晶片類型 (ESP32)
-            if (params.config.fqbn.includes('esp32')) {
-                await flashESP32(result.artifacts, logger);
+            // Phase 4: 優先檢查快取
+            if (cachedArtifacts) {
+                logger('偵測到已編譯的快取檔案，跳過編譯步驟！');
+                artifacts = cachedArtifacts;
             } else {
-                throw new Error("目前僅支援 ESP32 的網頁直通燒錄");
+                // 沒有快取：走原本的編譯流程
+                logger(`正在發起線上編譯 (${COMPILE_SERVER_URL})...`);
+                
+                // 嘗試兩種請求格式：先用 GUI 原生的 params，再用簡潔版
+                const response = await fetch(COMPILE_SERVER_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(params), 
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    console.error('[Intersector] Compile server error:', errData);
+                    throw new Error(errData.error || '編譯伺服器錯誤');
+                }
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || '編譯失敗');
+                }
+                artifacts = result.artifacts;
             }
 
-            logger("燒錄流程全數完成！");
+            logger('編譯完成！正在處理 Binary 檔案...');
+
+            // 判斷晶片類型
+            const fqbn = (params.config && params.config.fqbn) || '';
+            if (fqbn.includes('esp32')) {
+                await flashESP32(artifacts, logger);
+            } else {
+                throw new Error('目前僅支援 ESP32 的網頁直通燒錄');
+            }
+
+            // 燒錄成功後清除快取（避免再次燒錄舊版）
+            cachedArtifacts = null;
+            cachedCodeHash = null;
+
+            logger('燒錄流程全數完成！');
             
             injectMessage(ws, {
                 jsonrpc: "2.0",

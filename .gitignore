@@ -3,6 +3,7 @@
 *.7z
 .tubitblockData/
 tubitblock-link/node_modules/
+compiler-server/node_modules/
 tubitblock-link/.tubitblockData/
 tubitblock-link/tmp/
 tubitblock-link/tools/Arduino/hardware/
