@@ -179,16 +179,25 @@
 
     // 從 GUI 取得當前的程式碼與 board 設定
     function getCurrentCodeFromGUI() {
-        // 嘗試從 GUI 的 code editor 取得程式碼
-        const codeEditor = document.querySelector('.ace_text-layer');
-        if (codeEditor) {
-            return codeEditor.textContent || '';
+        // 嘗試從 GUI 的 Ace editor 取得程式碼，必須逐行取得以保留換行符號
+        const aceLines = document.querySelectorAll('.ace_line');
+        if (aceLines.length > 0) {
+            // 將所有行合併，使用換行符號隔開
+            return Array.from(aceLines).map(l => l.textContent).join('\n');
         }
-        // 退路：嘗試取得 Monaco editor 或其他編輯器的內容
+        
+        // 如果沒有 Ace editor，退路：嘗試取得 Monaco editor 內容
         const monacoLines = document.querySelectorAll('.view-line');
         if (monacoLines.length > 0) {
             return Array.from(monacoLines).map(l => l.textContent).join('\n');
         }
+        
+        // 再退一步，如果只有純 text layer (雖然這會失去換行，但留作備用)
+        const codeEditor = document.querySelector('.ace_text-layer');
+        if (codeEditor) {
+            return codeEditor.textContent || '';
+        }
+        
         return null;
     }
 

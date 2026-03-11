@@ -159,6 +159,8 @@ app.post('/compile', async (req, res) => {
 
     } catch (err) {
         console.error(`[Compile] Build ${buildId} FAILED:`, err.stderr || err.message);
+        console.error(`[Compile] Failed Source Code length:`, sourceCode.length);
+        console.error(`[Compile] First 300 chars:`, sourceCode.slice(0, 300));
 
         // 回傳編譯錯誤（包含 arduino-cli 的 stderr）
         res.status(400).json({
