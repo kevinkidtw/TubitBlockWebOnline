@@ -37,7 +37,7 @@ const TUbitv2Arduino = formatMessage => {
     device.programMode = ['realtime', 'upload'];
     device.deviceExtensions = ['tubitv2','tubitv2var','tubitv2b','tubitv2o','tubitv2m','tubitv2sm'],
     device.deviceExtensionsCompatible = 'arduinoEsp32';
-    device.hide = true;
+    device.hide = false;
     return device;
 };
 
@@ -48,7 +48,7 @@ const TUbitv2MicroPython = formatMessage => {
     device.programMode = ['upload'];
     device.deviceExtensions = [];
     device.deviceExtensionsCompatible = 'microPythonEsp32';
-    device.hide = true;
+    device.hide = false;
     return device;
 };
 

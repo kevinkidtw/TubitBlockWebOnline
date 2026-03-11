@@ -3,6 +3,7 @@ const url = require('url');
 const { Server } = require('ws');
 const Emitter = require('events');
 const path = require('path');
+const fs = require('fs');
 const fetch = require('node-fetch');
 const clc = require('cli-color');
 
@@ -133,10 +134,59 @@ class TUbitBlockLink extends Emitter {
             this._host = host;
         }
 
-        this._httpServer.on('request', (request, res) => {
-            if (request.url === '/') {
+        this._httpServer.on('request', async (req, res) => {
+            if (req.url === '/') {
                 res.writeHead(200, { 'Content-Type': 'text/html' });
                 res.end(SERVER_NAME);
+            } else if (req.url === '/compile' && req.method === 'POST') {
+                let body = '';
+                req.on('data', chunk => {
+                    body += chunk.toString();
+                });
+                req.on('end', async () => {
+                    try {
+                        const params = JSON.parse(body);
+                        const {message, config, encoding} = params;
+                        const code = Buffer.from(message, encoding).toString();
+
+                        console.log(`[Link] Compilation request received for board: ${config.fqbn}`);
+
+                        const Arduino = require('./upload/arduino');
+                        const tool = new Arduino(null, config, this.userDataPath, this.toolsPath, () => {});
+
+                        const exitCode = await tool.build(code);
+                        if (exitCode === 'Success') {
+                            // Collect build artifacts
+                            const artifacts = {};
+                            const buildDir = tool._buildPath;
+                            if (fs.existsSync(buildDir)) {
+                                const files = fs.readdirSync(buildDir);
+                                for (const file of files) {
+                                    if (file.endsWith('.bin') || file.endsWith('.hex')) {
+                                        const filePath = path.join(buildDir, file);
+                                        artifacts[file] = fs.readFileSync(filePath).toString('base64');
+                                    }
+                                }
+                            }
+
+                            res.writeHead(200, {'Content-Type': 'application/json'});
+                            res.end(JSON.stringify({
+                                success: true,
+                                artifacts: artifacts
+                            }));
+                        } else {
+                            res.writeHead(400, {'Content-Type': 'application/json'});
+                            res.end(JSON.stringify({
+                                success: false,
+                                error: 'Compilation failed'
+                            }));
+                        }
+                    } catch (err) {
+                        console.error('[Link] Compile error:', err);
+                        res.writeHead(500, {'Content-Type': 'application/json'});
+                        res.end(JSON.stringify({success: false, error: err.message}));
+                    }
+                });
             }
         });
 

@@ -293,6 +293,10 @@ echo ""
 # 偵測專案根目錄（包含 www/ 和 external-resources/ 的目錄）
 PROJECT_ROOT="$(cd "$LINK_DIR/.." && pwd)"
 
+# 設定外部資源路徑環境變數，確保 GUI 讀取當前目錄的資源
+export OPENBLOCK_EXTERNAL_RESOURCES="$PROJECT_ROOT/external-resources"
+echo "已設定資源路徑: $OPENBLOCK_EXTERNAL_RESOURCES"
+
 # 如果本地有 www/ 目錄，啟動 HTTP 靜態伺服器供本地開發使用
 if [ -d "$PROJECT_ROOT/www" ]; then
     lsof -ti:8080 | xargs kill -9 2>/dev/null || true
