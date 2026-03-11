@@ -13,7 +13,7 @@
     // --- 編譯伺服器設定 ---
     // 優先使用本地伺服器 / NAS
     const COMPILE_SERVER_URL = window.TUBITBLOCK_COMPILE_SERVER
-        || 'http://192.168.68.104:3000/compile';
+        || 'http://192.168.68.113:3000/compile';
 
     // --- 編譯快取 (Phase 4) ---
     let cachedArtifacts = null;   // Base64 artifacts from last successful compile
