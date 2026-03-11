@@ -21,27 +21,28 @@
             ws.send = function (data) {
                 try {
                     const json = JSON.parse(data);
-                    console.log('[Intersector] Sending JSON-RPC:', json.method, json);
-                    
-                    const method = json.method ? json.method.replace('serialport/', '') : '';
+                    if (json && json.method) {
+                        console.log('[Intersector] Outgoing JSON-RPC Method:', json.method);
+                        const method = json.method.replace('serialport/', '');
 
-                    if (method === 'upload') {
-                        console.log('[Intersector] Intercepting Upload!');
-                        handleInterceptedUpload(ws, json);
-                        return; 
-                    }
-                    if (method === 'discover') {
-                        console.log('[Intersector] Intercepting Discover!');
-                        handleInterceptedDiscover(ws, json);
-                        return;
-                    }
-                    if (method === 'connect') {
-                        console.log('[Intersector] Intercepting Connect!');
-                        handleInterceptedConnect(ws, json);
-                        return;
+                        if (method === 'upload') {
+                            console.log('[Intersector] Detected Upload! Triggering compilation and flashing...');
+                            handleInterceptedUpload(ws, json);
+                            return; 
+                        }
+                        if (method === 'discover') {
+                            console.log('[Intersector] Detected Discover! Injecting virtual device...');
+                            handleInterceptedDiscover(ws, json);
+                            return;
+                        }
+                        if (method === 'connect') {
+                            console.log('[Intersector] Detected Connect! Opening Web Serial...');
+                            handleInterceptedConnect(ws, json);
+                            return;
+                        }
                     }
                 } catch (e) {
-                    // console.warn('[Intersector] Non-JSON data:', data);
+                    // console.warn('[Intersector] Message parse error or non-JSON:', data);
                 }
                 return originalSend.apply(ws, arguments);
             };
@@ -117,12 +118,13 @@
             
             const response = await fetch('http://127.0.0.1:20111/compile', {
                 method: 'POST',
-                body: JSON.stringify(originalRequest), 
+                body: JSON.stringify(params), 
                 headers: { 'Content-Type': 'application/json' }
             });
 
             if (!response.ok) {
                 const errData = await response.json();
+                console.error('[Intersector] Compile server error response:', errData);
                 throw new Error(errData.error || "編譯伺服器錯誤");
             }
 

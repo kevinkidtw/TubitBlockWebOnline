@@ -139,6 +139,7 @@ class TUbitBlockLink extends Emitter {
                 res.writeHead(200, { 'Content-Type': 'text/html' });
                 res.end(SERVER_NAME);
             } else if (req.url === '/compile' && req.method === 'POST') {
+                console.log(clc.green('[Server] Received /compile request'));
                 let body = '';
                 req.on('data', chunk => {
                     body += chunk.toString();
