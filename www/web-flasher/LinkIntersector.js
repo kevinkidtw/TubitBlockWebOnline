@@ -9,6 +9,61 @@
 
 (function () {
     const OriginalWebSocket = window.WebSocket;
+    let cachedCompilationResult = null; // Phase 4 快取
+    
+    // --- 階段 1：DOM 監聽與「編譯」按鈕注入 ---
+    function injectCompileButton() {
+        const uploadButton = document.querySelector('div.hardware-header_upload-button_24CyN');
+        if (uploadButton && !document.getElementById('web-flasher-compile-btn')) {
+            console.log('[Intersector] Found Upload button, injecting Compile button...');
+            
+            // 複製上傳按鈕的 DOM 結構以維持一致的樣式
+            const compileButton = uploadButton.cloneNode(true);
+            compileButton.id = 'web-flasher-compile-btn';
+            
+            // 修改文字與圖示 (如果有的話)
+            const textSpan = compileButton.querySelector('span');
+            if (textSpan) {
+                textSpan.textContent = '編譯 (線上)';
+            }
+            
+            // 更改顏色以區分 (可選，這裡稍微調暗一點藍色)
+            compileButton.style.backgroundColor = '#155bb5';
+            compileButton.style.marginRight = '10px';
+            
+            // 點擊事件：暫時先用 alert 測試，後續實作 handleCompileOnly
+            compileButton.addEventListener('click', (e) => {
+                e.stopPropagation(); // 避免觸發原本的父節點事件
+                console.log('[Intersector] Compile button clicked!');
+                alert('準備實作線上編譯！');
+                // TODO: 實作向本地 Server (稍後改為遠端) 請求 /compile
+            });
+
+            // 插入到上傳按鈕的前面
+            uploadButton.parentNode.insertBefore(compileButton, uploadButton);
+        }
+    }
+
+    // 使用 MutationObserver 監聽 DOM 變化，確保切換設備後依然能注入按鈕
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            if (mutation.addedNodes.length > 0) {
+                // 節流檢查，避免過多查詢
+                injectCompileButton();
+            }
+        }
+    });
+
+    // 等待 body 出現後開始監聽
+    if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+    } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+    }
+    // ----------------------------------------
+
 
     function HookedWebSocket(url, protocols) {
         console.log('[Intersector] WebSocket Attempt:', url);
