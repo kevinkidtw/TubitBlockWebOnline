@@ -42,6 +42,7 @@ RUN arduino-cli core install arduino:avr@1.8.6
 # --- 設定自訂函式庫 (Custom Libraries) ---
 RUN mkdir -p /root/Arduino/libraries
 COPY custom_libraries/ /root/Arduino/libraries/
+RUN find /root/Arduino/libraries -name "._*" -delete
 
 # --- 設定工作目錄 ---
 WORKDIR /app
