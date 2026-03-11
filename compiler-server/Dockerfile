@@ -39,6 +39,10 @@ RUN arduino-cli core install esp32:esp32@3.1.1
 # 安裝 Arduino AVR 核心 (Arduino Uno 等)
 RUN arduino-cli core install arduino:avr@1.8.6
 
+# --- 設定自訂函式庫 (Custom Libraries) ---
+RUN mkdir -p /root/Arduino/libraries
+COPY custom_libraries/ /root/Arduino/libraries/
+
 # --- 設定工作目錄 ---
 WORKDIR /app
 
