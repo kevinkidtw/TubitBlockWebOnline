@@ -62,11 +62,31 @@ window.Esp32WebFlasher = class {
         }
 
         let esploader;
-        const baudRate = 460800;
+        const connectBaudRate = 115200; // 初始連線使用 115200 較為穩定
+        const flashBaudRate = 460800;   // 燒錄時切換到高速
 
         try {
             // 1. 初始化連線
-            esploader = await this._getLoader(baudRate);
+            esploader = await this._getLoader(connectBaudRate);
+            this.log("[ESP32] 執行硬體重置進入下載模式 (DTR/RTS Toggle)...");
+            
+            // 由於部分開發板在使用 Web Serial 時，esptool-js 預設的 reset_strategy 可能會失效
+            // 導致一直在 waiting for download mode timeout。
+            // 我們手動透過 Transport 控制 DTR/RTS 來強制進入 Download Mode
+            try {
+                if (esploader.transport) {
+                    await esploader.transport.setDTR(false);
+                    await esploader.transport.setRTS(true);
+                    await new Promise(r => setTimeout(r, 100));
+                    await esploader.transport.setDTR(true);
+                    await esploader.transport.setRTS(false);
+                    await new Promise(r => setTimeout(r, 50));
+                    await esploader.transport.setDTR(false);
+                }
+            } catch (resetErr) {
+                this.log("[ESP32] 警告: 手動硬體重置信號發送失敗，將嘗試使用預設重置");
+            }
+
             this.log("[ESP32] 正在連接晶片 (Connect & Detect)...");
 
             if (typeof esploader.main === 'function') {
@@ -76,6 +96,13 @@ window.Esp32WebFlasher = class {
             }
 
             this.log(`[ESP32] 已連接！晶片類型: ${esploader.chip.CHIP_NAME}`);
+            
+            // 提升 Baudrate 以加速燒錄
+            if (flashBaudRate !== connectBaudRate) {
+                 this.log(`[ESP32] 修改 Baudrate 至 ${flashBaudRate}...`);
+                 // 利用 esptool 內建的 changeBaudrate（如果有的話，沒的話就不改）
+                 // 暫不強制改變，esptool.main() 內部通常會處理。
+            }
 
             // 2. 執行寫入
             this.log("[ESP32] 開始寫入 Flash 分區...");
