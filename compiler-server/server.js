@@ -64,7 +64,20 @@ app.post('/compile', async (req, res) => {
     
     if (!boardFqbn && req.body.config && req.body.config.fqbn) {
         const configFqbn = req.body.config.fqbn;
-        boardFqbn = typeof configFqbn === 'string' ? configFqbn : configFqbn.fqbn || configFqbn.board || '';
+        if (typeof configFqbn === 'string') {
+            boardFqbn = configFqbn;
+        } else {
+            console.log(`[Compile] config.fqbn is an object:`, JSON.stringify(configFqbn));
+            // 嘗試找到任何字串值，或是直接預設為 esp32
+            boardFqbn = configFqbn.fqbn || configFqbn.board || Object.values(configFqbn).find(v => typeof v === 'string') || 'esp32:esp32:esp32';
+            console.log(`[Compile] Extracted boardFqbn from object: ${boardFqbn}`);
+        }
+    }
+    
+    // 如果真的還是沒有，因為我們現在都在燒 ESP32，先給一個預設值
+    if (!boardFqbn) {
+        boardFqbn = 'esp32:esp32:esp32';
+        console.warn(`[Compile] Warning: boardFqbn missing in payload, defaulting to esp32:esp32:esp32. Payload was:`, JSON.stringify(req.body).slice(0, 300));
     }
     
     // 確保最終是字串並去除空白
