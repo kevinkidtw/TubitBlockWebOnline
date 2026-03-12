@@ -107,13 +107,25 @@ window.Esp32WebFlasher = class {
             // 2. 執行寫入
             this.log("[ESP32] 開始寫入 Flash 分區...");
 
-            // 格式轉換：esptool-js 要求 data 是字串或內容，我們傳入正確的物件列表
+            // 格式轉換：esptool-js 0.5.x 要求 data 是 binary string，而非 Uint8Array
+            // 同時嚴格檢查 flashOptions (必需提供 string 避免 indexOf undefined)
+            const formattedFileArray = fileArray.map(file => ({
+                data: typeof file.data === 'string' 
+                      ? file.data 
+                      : String.fromCharCode.apply(null, file.data),
+                address: file.address
+            }));
+
             await esploader.writeFlash({
-                fileArray: fileArray,
-                flash_size: "keep",
-                flash_mode: "keep",
-                flash_freq: "keep",
-                calculate_checksums: true
+                fileArray: formattedFileArray,
+                flashSize: "keep",
+                flashMode: "keep",
+                flashFreq: "keep",
+                eraseAll: false,
+                compress: true,
+                reportProgress: (fileIndex, written, total) => {
+                    this.log(`[ESP32] 寫入進度: 第 ${fileIndex + 1} 個檔案, 已寫入 ${written} / ${total} bytes`);
+                }
             });
 
             this.log("[ESP32] 燒錄成功！");
