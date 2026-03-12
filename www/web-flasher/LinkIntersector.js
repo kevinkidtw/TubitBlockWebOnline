@@ -315,12 +315,22 @@
 
             logger('編譯完成！正在處理 Binary 檔案...');
 
-            // 判斷晶片類型
-            const fqbn = (params.config && params.config.fqbn) || '';
-            if (fqbn.includes('esp32')) {
+            // 判斷晶片類型 (安全轉型避免 fqbn 為 object 導致 includes is not a function)
+            const fqbnRaw = (params && params.config && params.config.fqbn);
+            const boardRaw = (params && params.board);
+            const typeStr = JSON.stringify({ fqbn: fqbnRaw, board: boardRaw }).toLowerCase();
+
+            if (typeStr.includes('esp32')) {
                 await flashESP32(artifacts, logger);
             } else {
-                throw new Error('目前僅支援 ESP32 的網頁直通燒錄');
+                // 如果前端 API 有變無法分辨，但產出檔案裡有 bootloader，我們就假設是 ESP32
+                const hasBootloader = Object.keys(artifacts).some(k => k.includes('bootloader'));
+                if (hasBootloader) {
+                    logger('無法從指令分辨硬體類型，但偵測到 bootloader 檔案，自動啟用 ESP32 燒錄模式');
+                    await flashESP32(artifacts, logger);
+                } else {
+                    throw new Error('無法判斷設備類型，或目前不支援該晶片的網頁直通燒錄 (僅支援 ESP32)');
+                }
             }
 
             // 燒錄成功後清除快取（避免再次燒錄舊版）
