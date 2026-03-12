@@ -283,6 +283,18 @@
         };
 
         try {
+            // --- 重大修復：SecurityError ---
+            // Web Serial 的 requestPort 必須在「使用者手勢」(User Gesture) 的 call stack 裡面執行。
+            // 由於之前的 fetch 是非同步的，等 fetch 回來後就失去了手勢上下文。
+            // 解決方案：在開始編譯 (fetch) 之前，就先檢查並請求 Port 權限。
+            if (!window.serialManager.isOpen) {
+                logger("偵測到序列埠尚未連線，正在請求存取權限...");
+                await window.serialManager.requestPort();
+                // 先用 115200 開啟（之後閃爍時會自動調整，或者是這裡直接用 460800 也可以）
+                await window.serialManager.open(115200); 
+                logger("序列埠已就緒。");
+            }
+
             let artifacts;
 
             // Phase 4: 優先檢查快取
