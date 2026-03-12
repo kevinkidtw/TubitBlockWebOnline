@@ -1,8 +1,16 @@
 /**
  * Esp32WebFlasher.js
  * 
- * 整合官方 esptool-js 的 ESP32 燒錄模組。
+ * 整合官方 esptool-js (v0.5.7) 的 ESP32 燒錄模組。
  * 將 SerialManager 的 Port 授權給 esptool-js 進行協定通訊。
+ * 
+ * 使用方式：
+ *   const flasher = new Esp32WebFlasher(window.serialManager, logger);
+ *   await flasher.flashData([
+ *     { data: Uint8Array, address: 0x1000 },   // bootloader
+ *     { data: Uint8Array, address: 0x8000 },   // partition table
+ *     { data: Uint8Array, address: 0x10000 },  // application
+ *   ]);
  */
 
 window.Esp32WebFlasher = class {
@@ -16,37 +24,68 @@ window.Esp32WebFlasher = class {
     }
 
     /**
-     * 核心輔助：動態載入 esptool-js 並建立 Loader
+     * 將 Uint8Array 安全地轉換為 binary string。
+     * 不使用 String.fromCharCode.apply()，因為大型韌體（>64KB）會超過
+     * JavaScript call stack 限制而導致 "RangeError: Maximum call stack size exceeded"。
+     * @param {Uint8Array} u8Array
+     * @returns {string}
      */
-    async _getLoader(baudRate) {
+    static uint8ArrayToBinaryString(u8Array) {
+        const CHUNK_SIZE = 0x8000; // 32KB chunks, safe for call stack
+        const parts = [];
+        for (let i = 0; i < u8Array.length; i += CHUNK_SIZE) {
+            const slice = u8Array.subarray(i, Math.min(i + CHUNK_SIZE, u8Array.length));
+            parts.push(String.fromCharCode.apply(null, slice));
+        }
+        return parts.join('');
+    }
+
+    /**
+     * 核心輔助：動態載入 esptool-js 並建立 ESPLoader
+     * 
+     * 重要參數說明 (依據 esptool-js@0.5.7 源碼):
+     *   - romBaudrate: 初始 ROM 握手時使用的 Baud Rate（預設 115200）
+     *   - baudrate: Stub 載入成功後要切換到的目標 Baud Rate
+     *   - main() 內部邏輯: if (romBaudrate !== baudrate) changeBaud()
+     *     所以如果兩者相同，就不會變速。
+     * 
+     * @param {number} targetBaudrate - Stub 載入後的目標 Baud Rate
+     * @returns {ESPLoader}
+     */
+    async _getLoader(targetBaudrate) {
         this.log("[ESP32] 關閉現有監聽以釋放 Port...");
-        // 關鍵：先讓 Manager 釋放串流但不刪除 Port 引用
+        // 關鍵：先讓 Manager 釋放串流但保留 Port 引用，供 esptool 直接使用
         await this.manager.close(true);
 
         this.log("[ESP32] 正在向雲端請求燒錄引擎元件 (ESM Import)...");
 
-        // 1. 使用動態 Import 載入最新版 esptool-js (ESM 版)
-        // 註：這能完美解決 全域變數找不到 的問題
+        // 使用動態 Import 載入 esptool-js (ESM 版)
         const module = await import("https://cdn.jsdelivr.net/npm/esptool-js@0.5.7/+esm");
 
-        // 2. 檢查 pako (esptool-js 的相依項)
+        // 檢查 pako (esptool-js 的壓縮相依項)
         if (typeof pako === 'undefined') {
             throw new Error("找不到 pako 庫，請檢查 index.html 是否正確載入。");
         }
 
-        // 3. 進入燒錄模式
+        // 進入燒錄模式（停止 SerialManager 的 readLoop 干擾）
         this.manager.enableFlashingMode();
 
-        // 4. 建立 Transport 與 Loader
+        // 建立 Transport（esptool-js 自己會管理 port 的 open/close）
         const transport = new module.Transport(this.port);
+
+        // 建立 ESPLoader
+        // romBaudrate = 115200 (固定，ROM 握手用)
+        // baudrate = targetBaudrate (Stub 載入後切換到的高速率)
         const esploader = new module.ESPLoader({
             transport: transport,
-            baudrate: baudRate,
+            baudrate: targetBaudrate,
+            romBaudrate: 115200,
             terminal: {
                 clean: () => { },
                 writeLine: (data) => this.log(data),
-                write: (data) => console.log(data)
-            }
+                write: (data) => this.log(data)
+            },
+            // debugLogging: true  // 除錯時可開啟
         });
 
         return esploader;
@@ -54,7 +93,8 @@ window.Esp32WebFlasher = class {
 
     /**
      * 執行完整燒錄流程
-     * @param {Array} fileArray 格式為 [{ data: Uint8Array, address: 0x1000 }, ...]
+     * @param {Array<{data: Uint8Array, address: number}>} fileArray 
+     *        格式為 [{ data: Uint8Array, address: 0x1000 }, ...]
      */
     async flashData(fileArray) {
         if (!fileArray || fileArray.length === 0) {
@@ -62,102 +102,73 @@ window.Esp32WebFlasher = class {
         }
 
         let esploader;
-        const connectBaudRate = 115200; // 初始連線使用 115200 較為穩定
-        const flashBaudRate = 460800;   // 燒錄時切換到高速
+        // 目標 Baud Rate：Stub 載入後自動從 115200 切換到此速率
+        const targetBaudrate = 460800;
 
         try {
-            // 1. 初始化連線
-            esploader = await this._getLoader(connectBaudRate);
-            this.log("[ESP32] 執行硬體重置進入下載模式 (DTR/RTS Toggle)...");
-            
-            // 由於部分開發板在使用 Web Serial 時，esptool-js 預設的 reset_strategy 可能會失效
-            // 導致一直在 waiting for download mode timeout。
-            // 我們手動透過 Transport 控制 DTR/RTS 來強制進入 Download Mode
-            try {
-                if (esploader.transport) {
-                    await esploader.transport.setDTR(false);
-                    await esploader.transport.setRTS(true);
-                    await new Promise(r => setTimeout(r, 100));
-                    await esploader.transport.setDTR(true);
-                    await esploader.transport.setRTS(false);
-                    await new Promise(r => setTimeout(r, 50));
-                    await esploader.transport.setDTR(false);
-                }
-            } catch (resetErr) {
-                this.log("[ESP32] 警告: 手動硬體重置信號發送失敗，將嘗試使用預設重置");
-            }
+            // ===== 階段 1：初始化連線 =====
+            esploader = await this._getLoader(targetBaudrate);
 
             this.log("[ESP32] 正在連接晶片 (Connect & Detect)...");
 
-            if (typeof esploader.main === 'function') {
-                await esploader.main();
-            } else if (typeof esploader.main_fn === 'function') {
-                await esploader.main_fn();
-            }
+            // esploader.main() 內部會依序執行：
+            //   1. detectChip() → connect() → transport.connect(romBaudrate)
+            //      → constructResetSequence() → ClassicReset (DTR/RTS toggle)
+            //      → sync() 握手
+            //   2. 讀取晶片資訊（型號、功能、MAC）
+            //   3. runStub() 上傳 flasher stub 到 RAM
+            //   4. changeBaud() if romBaudrate !== baudrate → 切換到 targetBaudrate
+            await esploader.main();
 
             this.log(`[ESP32] 已連接！晶片類型: ${esploader.chip.CHIP_NAME}`);
-            
-            // 提升 Baudrate 以加速燒錄
-            if (flashBaudRate !== connectBaudRate) {
-                 this.log(`[ESP32] 修改 Baudrate 至 ${flashBaudRate}...`);
-                 // 利用 esptool 內建的 changeBaudrate（如果有的話，沒的話就不改）
-                 // 暫不強制改變，esptool.main() 內部通常會處理。
-            }
 
-            // 2. 執行寫入
+            // ===== 階段 2：寫入 Flash =====
             this.log("[ESP32] 開始寫入 Flash 分區...");
 
-            // 格式轉換：esptool-js 0.5.x 要求 data 是 binary string，而非 Uint8Array
-            // 同時嚴格檢查 flashOptions (必需提供 string 避免 indexOf undefined)
+            // 格式轉換：esptool-js 0.5.x 的 writeFlash 要求 data 為 binary string
+            // 使用分段轉換避免大檔案導致 call stack overflow
             const formattedFileArray = fileArray.map(file => ({
-                data: typeof file.data === 'string' 
-                      ? file.data 
-                      : String.fromCharCode.apply(null, file.data),
+                data: typeof file.data === 'string'
+                      ? file.data
+                      : Esp32WebFlasher.uint8ArrayToBinaryString(file.data),
                 address: file.address
             }));
 
             await esploader.writeFlash({
                 fileArray: formattedFileArray,
-                flashSize: "keep",
-                flashMode: "keep",
-                flashFreq: "keep",
-                eraseAll: false,
-                compress: true,
+                flashSize: "keep",    // 不修改 flash 大小參數（保持原樣）
+                flashMode: "keep",    // 不修改 flash 模式（保持原樣）
+                flashFreq: "keep",    // 不修改 flash 頻率（保持原樣）
+                eraseAll: false,      // 不全域擦除（只擦寫入的區域）
+                compress: true,       // 必須為 true，esptool-js 0.5.x 不支援未壓縮寫入
                 reportProgress: (fileIndex, written, total) => {
-                    this.log(`[ESP32] 寫入進度: 第 ${fileIndex + 1} 個檔案, 已寫入 ${written} / ${total} bytes`);
+                    const percent = total > 0 ? Math.round((written / total) * 100) : 0;
+                    this.log(`[ESP32] 寫入進度: 第 ${fileIndex + 1}/${formattedFileArray.length} 個檔案, ${percent}% (${written}/${total} bytes)`);
                 }
             });
 
-            this.log("[ESP32] 燒錄成功！");
+            this.log("[ESP32] 全部分區寫入完成！");
+
+            // ===== 階段 3：重啟晶片 =====
+            this.log("[ESP32] 正在硬體重啟晶片...");
+            try {
+                await esploader.after("hard_reset");
+            } catch (resetErr) {
+                // 某些開發板的硬體重啟可能不完美，但不影響燒錄結果
+                this.log("[ESP32] 警告: 硬體重啟信號可能未完全送達，請手動按 EN/Reset 按鈕");
+            }
+
+            this.log("[ESP32] ✅ 燒錄成功！晶片已重啟運行新韌體。");
 
         } catch (e) {
-            this.log(`[ESP32] 燒錄失敗: ${e.message}`);
+            this.log(`[ESP32] ❌ 燒錄失敗: ${e.message}`);
             throw e;
         } finally {
-            // 3. 恢復一般模式
+            // ===== 階段 4：恢復一般模式 =====
             if (this.manager) {
                 this.manager.disableFlashingMode();
             }
             this.log("[ESP32] 燒錄流程結束。");
         }
-    }
-
-    /**
-     * 測試錄一個基本的 Blink
-     * 為了示範，我們會嘗試載入典型的 ESP32 三大區塊 (暫用 dummy 資料)
-     */
-    async flashTestBlink() {
-        this.log("[ESP32] 啟動測試燒錄 (模擬多分區寫入)...");
-
-        // 這裡僅為結構展示，實際需要對應晶片的 bin 檔
-        // 典型的 ESP32 位址: 0x1000 (bootloader), 0x8000 (part-table), 0x10000 (app)
-        this.log("[ESP32] 注意：目前僅為 API 結構驗證，準備寫入空分區測試介面相容性...");
-
-        const dummyData = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
-        const testFileArray = [
-            { data: dummyData, address: 0x10000 } // 僅測試寫入單一小區塊
-        ];
-
-        return await this.flashData(testFileArray);
     }
 };
