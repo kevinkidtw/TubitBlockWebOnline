@@ -56,8 +56,20 @@ app.post('/compile', async (req, res) => {
         const encoding = req.body.encoding || 'utf8';
         sourceCode = Buffer.from(req.body.message, encoding).toString();
     }
+    
+    // 如果 req.body.fqbn 或 req.body.config.fqbn 是物件，嘗試提取它裡面的字串值
+    if (boardFqbn && typeof boardFqbn !== 'string') {
+        boardFqbn = boardFqbn.fqbn || boardFqbn.board || Object.values(boardFqbn).find(v => typeof v === 'string') || JSON.stringify(boardFqbn);
+    }
+    
     if (!boardFqbn && req.body.config && req.body.config.fqbn) {
-        boardFqbn = req.body.config.fqbn;
+        const configFqbn = req.body.config.fqbn;
+        boardFqbn = typeof configFqbn === 'string' ? configFqbn : configFqbn.fqbn || configFqbn.board || '';
+    }
+    
+    // 確保最終是字串並去除空白
+    if (typeof boardFqbn === 'string') {
+        boardFqbn = boardFqbn.trim();
     }
 
     if (!sourceCode) {
@@ -85,7 +97,8 @@ app.post('/compile', async (req, res) => {
 
         // 使用 shell exec (而非 execFile) 以正確捕捉 stderr+stdout
         const librariesFlag = libraries ? `--libraries "${libraries}"` : '';
-        const cmd = `${ARDUINO_CLI} compile --fqbn ${boardFqbn} ${librariesFlag} --build-path "${buildDir}" "${sketchDir}" 2>&1`;
+        // 加雙引號包住 fqbn 防止有空白被切斷
+        const cmd = `${ARDUINO_CLI} compile --fqbn "${boardFqbn}" ${librariesFlag} --build-path "${buildDir}" "${sketchDir}" 2>&1`;
 
         console.log(`[Compile] Running: ${cmd}`);
 
