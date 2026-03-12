@@ -81,7 +81,7 @@ window.Esp32WebFlasher = class {
             this.log("[ESP32] 開始寫入 Flash 分區...");
 
             // 格式轉換：esptool-js 要求 data 是字串或內容，我們傳入正確的物件列表
-            await esploader.write_flash({
+            await esploader.writeFlash({
                 fileArray: fileArray,
                 flash_size: "keep",
                 flash_mode: "keep",
