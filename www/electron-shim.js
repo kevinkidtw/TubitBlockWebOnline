@@ -909,7 +909,7 @@
     (function () {
         var _originalFetch = window.fetch;
         var RESOURCE_SERVER_RE = /^https?:\/\/127\.0\.0\.1:20112\//;
-        var BASE_URL = '../external-resources/';
+        var BASE_URL = './external-resources/';
 
         window.fetch = function (input, init) {
             var url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
@@ -958,7 +958,7 @@
     (function () {
         var _origXHROpen = XMLHttpRequest.prototype.open;
         var RESOURCE_SERVER_RE = /^https?:\/\/127\.0\.0\.1:20112\//;
-        var BASE_URL = '../external-resources/';
+        var BASE_URL = './external-resources/';
 
         XMLHttpRequest.prototype.open = function (method, url) {
             if (typeof url === 'string' && RESOURCE_SERVER_RE.test(url)) {
@@ -979,7 +979,7 @@
     // 2. loadjs creating <script src="http://127.0.0.1:20112/..."> for extension JS files
     (function () {
         var RESOURCE_SERVER_RE = /^https?:\/\/127\.0\.0\.1:20112\//;
-        var BASE_URL = '../external-resources/';
+        var BASE_URL = './external-resources/';
 
         function rewriteUrl(url) {
             if (url && RESOURCE_SERVER_RE.test(url)) {
@@ -1185,29 +1185,63 @@
             vm._webPatched = true;
             clearInterval(patchInterval);
             console.log('[TUbitBlock Web] VM loadProject patched successfully.');
-
-            // If project wasn't loaded yet (0 targets), try loading default project
-            if (vm.runtime.targets.length === 0) {
-                console.log('[TUbitBlock Web] No targets loaded, attempting default project load...');
-                var storage = vm.runtime.storage;
-                if (storage) {
-                    storage.load(storage.AssetType.Project, '0', storage.DataFormat.JSON)
-                        .then(function (projectAsset) {
-                            if (projectAsset && projectAsset.data) {
-                                console.log('[TUbitBlock Web] Loading default project...');
-                                vm.loadProject(projectAsset.data);
-                            }
-                        })
-                        .catch(function (e) {
-                            console.error('[TUbitBlock Web] Failed to load default project:', e);
-                        });
-                }
-            }
         }, 500);
 
         // Stop polling after 30 seconds
         setTimeout(function () {
             clearInterval(patchInterval);
+        }, 30000);
+
+        // ---- Redux Store Patcher: Prevent crash on dispatch(undefined) ----
+        // Some action creators (like onLoadedProject) may return undefined if 
+        // the state is unexpected, causing Redux to crash when accessing .type.
+        var storeInterval = setInterval(function () {
+            var store;
+            // Search for store in React fiber tree
+            var el = document.getElementById('app') || document.querySelector('.flex-row');
+            if (el) {
+                var keys = Object.keys(el);
+                for (var i = 0; i < keys.length; i++) {
+                    var key = keys[i];
+                    if (key.indexOf('__reactFiber$') === 0 || key.indexOf('__reactInternalInstance$') === 0) {
+                        var fiber = el[key];
+                        while (fiber) {
+                            if (fiber.memoizedProps && fiber.memoizedProps.store) {
+                                store = fiber.memoizedProps.store;
+                                break;
+                            }
+                            if (fiber.stateNode && fiber.stateNode.store) {
+                                store = fiber.stateNode.store;
+                                break;
+                            }
+                            fiber = fiber.return;
+                        }
+                    }
+                    if (store) break;
+                }
+            }
+
+            if (store && store.dispatch && !store._webPatched) {
+                var origDispatch = store.dispatch;
+                store.dispatch = function (action) {
+                    if (!action || typeof action !== 'object' || !action.type) {
+                        if (!action) {
+                            console.warn('[TUbitBlock Web] Intercepted undefined/null action dispatch');
+                        } else {
+                            console.warn('[TUbitBlock Web] Intercepted invalid action dispatch (missing type):', action);
+                        }
+                        return;
+                    }
+                    return origDispatch.call(store, action);
+                };
+                store._webPatched = true;
+                clearInterval(storeInterval);
+                console.log('[TUbitBlock Web] Redux dispatch patched successfully.');
+            }
+        }, 500);
+
+        setTimeout(function () {
+            clearInterval(storeInterval);
         }, 30000);
     })();
 

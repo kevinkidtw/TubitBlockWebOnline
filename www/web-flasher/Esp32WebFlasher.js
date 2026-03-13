@@ -153,9 +153,23 @@ window.Esp32WebFlasher = class {
             this.log("[ESP32] 正在硬體重啟晶片...");
             try {
                 await esploader.after("hard_reset");
-            } catch (resetErr) {
-                // 某些開發板的硬體重啟可能不完美，但不影響燒錄結果
-                this.log("[ESP32] 警告: 硬體重啟信號可能未完全送達，請手動按 EN/Reset 按鈕");
+            } catch (e) { /* ignore */ }
+
+            // 二次重置：確保 transport 已釋放 port 後，直接用 Web Serial 發更長的 RTS 脈衝
+            // 給 TuBit MTC v2 等自動重置電路更多反應時間（標準 100ms → 200ms）
+            try {
+                if (esploader.transport) {
+                    try { await esploader.transport.disconnect(); } catch (e) { /* port 可能已斷，忽略 */ }
+                }
+                await new Promise(r => setTimeout(r, 200));
+                await this.port.open({ baudRate: 115200 });
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+                await new Promise(r => setTimeout(r, 200));
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+                await this.port.close();
+                this.log("[ESP32] 重置脈衝已送出。");
+            } catch (retryErr) {
+                this.log("[ESP32] 提示：若程式未自動啟動，請手動按板子上的 EN/RST 按鈕。");
             }
 
             this.log("[ESP32] ✅ 燒錄成功！晶片已重啟運行新韌體。");
@@ -167,6 +181,14 @@ window.Esp32WebFlasher = class {
             // ===== 階段 4：恢復一般模式 =====
             if (this.manager) {
                 this.manager.disableFlashingMode();
+            }
+            // 重新開啟序列埠，讓下次上傳無需按 F5
+            try {
+                await new Promise(r => setTimeout(r, 300));
+                await this.manager.open(115200);
+                this.log("[ESP32] 序列埠已恢復，可直接再次上傳。");
+            } catch (reopenErr) {
+                this.log("[ESP32] 序列埠未自動重開（下次上傳時會重新請求）。");
             }
             this.log("[ESP32] 燒錄流程結束。");
         }

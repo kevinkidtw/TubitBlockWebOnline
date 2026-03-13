@@ -64,6 +64,11 @@ window.SerialManager = class {
     /**
      * 關閉 Serial Port
      * @param {boolean} shouldKeepPort 是否保留 Port 物件引用供外部(如 esptool-js)使用
+     *
+     * 重要：Web Serial API 規範要求在呼叫 port.close() 之前，
+     * 所有 readable/writable stream 的鎖都必須被釋放。
+     * reader.cancel() 只是取消讀取，並不會自動釋放鎖，
+     * 必須額外呼叫 reader.releaseLock() 才能讓 port.close() 成功。
      */
     async close(shouldKeepPort = false) {
         if (!this.isOpen) return;
@@ -71,25 +76,35 @@ window.SerialManager = class {
         this.isOpen = false;
         this.isFlashingMode = false;
 
-        try {
-            if (this.reader) {
-                await this.reader.cancel();
-            }
-            if (this.writer) {
-                await this.writer.close();
-            }
-            if (this.port) {
-                await this.port.close();
-            }
-            console.log("[SerialManager] Port 已安全關閉");
-        } catch (e) {
-            console.warn("[SerialManager] 關閉 Port 時發生錯誤", e);
-        } finally {
+        // Step 1: 取消 reader 並釋放鎖（兩步缺一不可）
+        if (this.reader) {
+            try { await this.reader.cancel(); } catch (e) { /* 已取消或已關閉，忽略 */ }
+            try { this.reader.releaseLock(); } catch (e) { /* 已釋放，忽略 */ }
             this.reader = null;
+        }
+
+        // Step 2: 關閉 writer 並釋放鎖
+        if (this.writer) {
+            try { await this.writer.close(); } catch (e) { /* 已關閉，忽略 */ }
+            try { this.writer.releaseLock(); } catch (e) { /* 已釋放，忽略 */ }
             this.writer = null;
-            if (!shouldKeepPort) {
-                this.port = null;
+        }
+
+        // Step 3: 等一個 tick，讓 _startReadLoop 的 finally 有機會完成
+        await new Promise(r => setTimeout(r, 0));
+
+        // Step 4: 關閉 Port（此時所有 stream 鎖均已釋放，port.close() 才能成功）
+        if (this.port) {
+            try {
+                await this.port.close();
+                console.log("[SerialManager] Port 已安全關閉");
+            } catch (e) {
+                console.warn("[SerialManager] 關閉 Port 時發生錯誤:", e);
             }
+        }
+
+        if (!shouldKeepPort) {
+            this.port = null;
         }
     }
 

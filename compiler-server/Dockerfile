@@ -34,7 +34,8 @@ RUN arduino-cli config add board_manager.additional_urls \
 RUN arduino-cli core update-index
 
 # 安裝 ESP32 核心（這一步下載量大，約 300MB+，但只在 build 時下載一次）
-RUN arduino-cli core install esp32:esp32@3.1.1
+# 使用 3.1.3 以匹配 libTuBitCore.a 的預編譯目標版本（3.1.1 會導致 runtime 崩潰）
+RUN arduino-cli core install esp32:esp32@3.1.3
 
 # 安裝 Arduino AVR 核心 (Arduino Uno 等)
 RUN arduino-cli core install arduino:avr@1.8.6

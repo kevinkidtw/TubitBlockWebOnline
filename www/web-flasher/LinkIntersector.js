@@ -16,9 +16,10 @@
         || 'https://kevinkid-tubit.mooo.com:3001/compile';
 
     // --- 編譯快取 (Phase 4) ---
-    let cachedArtifacts = null;   // Base64 artifacts from last successful compile
-    let cachedCodeHash = null;    // 用來判斷程式碼是否已變更
-    let isCompiling = false;      // 防止重複點擊
+    let cachedArtifacts = null;       // Base64 artifacts from last successful compile
+    let cachedFlashAddresses = null;  // 對應的 flash 地址映射（由 server 回傳）
+    let cachedCodeHash = null;        // 用來判斷程式碼是否已變更
+    let isCompiling = false;          // 防止重複點擊
     
     // --- 階段 1：DOM 監聽與「編譯」按鈕注入 ---
     function injectCompileButton() {
@@ -73,44 +74,64 @@
     // ----------------------------------------
 
 
+    /**
+     * 為 :20111 (Link server) URL 建立一個假的 WebSocket 物件。
+     * 真實的 WebSocket 連線會因為 Link server 不存在而失敗，導致 GUI 顯示
+     * 「請安裝 TUbitBlock Link」的對話框。
+     * 假的 WS 立即模擬連線成功 (onopen)，並攔截所有 send() 呼叫。
+     */
+    function createFakeLinkWebSocket(url) {
+        const fakeWs = new EventTarget();
+        fakeWs.url = url;
+        fakeWs.readyState = 0; // CONNECTING
+        fakeWs.CONNECTING = 0; fakeWs.OPEN = 1; fakeWs.CLOSING = 2; fakeWs.CLOSED = 3;
+        fakeWs.onopen = null; fakeWs.onclose = null; fakeWs.onerror = null; fakeWs.onmessage = null;
+        fakeWs.bufferedAmount = 0; fakeWs.extensions = ''; fakeWs.protocol = ''; fakeWs.binaryType = 'blob';
+
+        // 包裝 dispatchEvent，同時觸發 on* 屬性回呼
+        const _baseDispatch = EventTarget.prototype.dispatchEvent.bind(fakeWs);
+        fakeWs.dispatchEvent = function (evt) {
+            const r = _baseDispatch(evt);
+            const h = fakeWs['on' + evt.type];
+            if (typeof h === 'function') h.call(fakeWs, evt);
+            return r;
+        };
+
+        fakeWs.send = function (data) {
+            try {
+                const json = JSON.parse(data);
+                if (json && json.method) {
+                    console.log('[Intersector] Outgoing JSON-RPC Method:', json.method);
+                    const method = json.method.replace('serialport/', '');
+                    if (method === 'upload')   { handleInterceptedUpload(fakeWs, json);   return; }
+                    if (method === 'discover') { handleInterceptedDiscover(fakeWs, json); return; }
+                    if (method === 'connect')  { handleInterceptedConnect(fakeWs, json);  return; }
+                }
+            } catch (e) {}
+            console.log('[Intersector] Unhandled WS send:', data);
+        };
+
+        fakeWs.close = function () {
+            fakeWs.readyState = 3;
+            fakeWs.dispatchEvent(new CloseEvent('close', { wasClean: true, code: 1000 }));
+        };
+
+        // 模擬立即連線成功
+        setTimeout(function () {
+            fakeWs.readyState = 1; // OPEN
+            fakeWs.dispatchEvent(new Event('open'));
+        }, 50);
+
+        return fakeWs;
+    }
+
     function HookedWebSocket(url, protocols) {
         console.log('[Intersector] WebSocket Attempt:', url);
-        const ws = new OriginalWebSocket(url, protocols);
-        
-        // 攔截所有到 port 20111 的請求
         if (url.includes(':20111')) {
-            console.log('[Intersector] Hooking Link WebSocket:', url);
-            const originalSend = ws.send;
-            ws.send = function (data) {
-                try {
-                    const json = JSON.parse(data);
-                    if (json && json.method) {
-                        console.log('[Intersector] Outgoing JSON-RPC Method:', json.method);
-                        const method = json.method.replace('serialport/', '');
-
-                        if (method === 'upload') {
-                            console.log('[Intersector] Detected Upload! Triggering compilation and flashing...');
-                            handleInterceptedUpload(ws, json);
-                            return; 
-                        }
-                        if (method === 'discover') {
-                            console.log('[Intersector] Detected Discover! Injecting virtual device...');
-                            handleInterceptedDiscover(ws, json);
-                            return;
-                        }
-                        if (method === 'connect') {
-                            console.log('[Intersector] Detected Connect! Opening Web Serial...');
-                            handleInterceptedConnect(ws, json);
-                            return;
-                        }
-                    }
-                } catch (e) {
-                    // console.warn('[Intersector] Message parse error or non-JSON:', data);
-                }
-                return originalSend.apply(ws, arguments);
-            };
+            console.log('[Intersector] Intercepting Link WebSocket, using fake WS (no real connection)');
+            return createFakeLinkWebSocket(url);
         }
-        return ws;
+        return new OriginalWebSocket(url, protocols);
     }
 
     HookedWebSocket.prototype = OriginalWebSocket.prototype;
@@ -122,10 +143,8 @@
             data: JSON.stringify(data)
         });
         console.log('[Intersector] Injecting message to GUI:', data.method || 'response', data);
+        // dispatchEvent 已被覆寫，內部會自動呼叫 onmessage，無需額外呼叫
         ws.dispatchEvent(event);
-        if (typeof ws.onmessage === 'function') {
-            ws.onmessage(event);
-        }
     }
 
     async function handleInterceptedDiscover(ws, originalRequest) {
@@ -240,7 +259,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     code: currentCode,
-                    board: 'esp32:esp32:esp32'  // TODO: 從 GUI 動態取得
+                    board: 'esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default'
                 })
             });
 
@@ -250,8 +269,9 @@
                 throw new Error(result.error || '編譯失敗');
             }
 
-            // 儲存快取
+            // 儲存快取（artifacts 與 flashAddresses 必須一起快取，保持一致性）
             cachedArtifacts = result.artifacts;
+            cachedFlashAddresses = result.flashAddresses || null;
             cachedCodeHash = codeHash;
 
             console.log(`[Intersector] 編譯成功！取得 ${result.artifactCount || Object.keys(result.artifacts).length} 個檔案`);
@@ -296,19 +316,21 @@
             }
 
             let artifacts;
+            let flashAddresses;
 
             // Phase 4: 優先檢查快取
             if (cachedArtifacts) {
                 logger('偵測到已編譯的快取檔案，跳過編譯步驟！');
                 artifacts = cachedArtifacts;
+                flashAddresses = cachedFlashAddresses;
             } else {
                 // 沒有快取：走原本的編譯流程
                 logger(`正在發起線上編譯 (${COMPILE_SERVER_URL})...`);
-                
+
                 // 嘗試兩種請求格式：先用 GUI 原生的 params，再用簡潔版
                 const response = await fetch(COMPILE_SERVER_URL, {
                     method: 'POST',
-                    body: JSON.stringify(params), 
+                    body: JSON.stringify(params),
                     headers: { 'Content-Type': 'application/json' }
                 });
 
@@ -323,6 +345,7 @@
                     throw new Error(result.error || '編譯失敗');
                 }
                 artifacts = result.artifacts;
+                flashAddresses = result.flashAddresses || null;
             }
 
             logger('編譯完成！正在處理 Binary 檔案...');
@@ -333,13 +356,13 @@
             const typeStr = JSON.stringify({ fqbn: fqbnRaw, board: boardRaw }).toLowerCase();
 
             if (typeStr.includes('esp32')) {
-                await flashESP32(artifacts, logger);
+                await flashESP32(artifacts, flashAddresses, logger);
             } else {
                 // 如果前端 API 有變無法分辨，但產出檔案裡有 bootloader，我們就假設是 ESP32
                 const hasBootloader = Object.keys(artifacts).some(k => k.includes('bootloader'));
                 if (hasBootloader) {
                     logger('無法從指令分辨硬體類型，但偵測到 bootloader 檔案，自動啟用 ESP32 燒錄模式');
-                    await flashESP32(artifacts, logger);
+                    await flashESP32(artifacts, flashAddresses, logger);
                 } else {
                     throw new Error('無法判斷設備類型，或目前不支援該晶片的網頁直通燒錄 (僅支援 ESP32)');
                 }
@@ -347,6 +370,7 @@
 
             // 燒錄成功後清除快取（避免再次燒錄舊版）
             cachedArtifacts = null;
+            cachedFlashAddresses = null;
             cachedCodeHash = null;
 
             logger('燒錄流程全數完成！');
@@ -375,7 +399,7 @@
         }
     }
 
-    async function flashESP32(artifacts, logger) {
+    async function flashESP32(artifacts, flashAddresses, logger) {
         if (!window.serialManager) throw new Error("SerialManager not initialized");
         if (!window.serialManager.isOpen) {
             logger("序列埠尚未開啟，正在請求權限並連線...");
@@ -384,22 +408,38 @@
         }
 
         const flasher = new window.Esp32WebFlasher(window.serialManager, logger);
-        
         const fileArray = [];
+
         for (const [name, base64] of Object.entries(artifacts)) {
-            const data = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-            
-            if (name.includes('bootloader')) {
-                fileArray.push({ data, address: 0x1000 });
-            } else if (name.includes('partitions')) {
-                fileArray.push({ data, address: 0x8000 });
-            } else if (name.endsWith('.bin') && !name.includes('bootloader') && !name.includes('partitions')) {
-                fileArray.push({ data, address: 0x10000 });
+            const bn = name.includes('/') ? name.split('/').pop() : name;
+            if (!bn.endsWith('.bin')) continue;  // 跳過 .hex / .elf
+
+            let address;
+            const hasServerMap = flashAddresses && Object.keys(flashAddresses).length > 0;
+            if (hasServerMap) {
+                // Server 有提供明確映射：只燒 server 清單內的檔案，其餘全部跳過
+                // （避免 merged.bin 等合併映像被誤燒到錯誤地址）
+                if (flashAddresses[name] === undefined) {
+                    logger(`  跳過 ${name}（不在 server 燒錄清單中）`);
+                    continue;
+                }
+                address = flashAddresses[name];
+            } else {
+                // 向下兼容 fallback：舊版 server 未回傳 flashAddresses 時依檔名推斷
+                if (bn.includes('merged')) { logger(`  跳過 ${name}（merged binary）`); continue; }
+                if (bn.includes('bootloader'))      address = 0x1000;
+                else if (bn === 'boot_app0.bin')    address = 0xe000;
+                else if (bn.includes('partitions')) address = 0x8000;
+                else                                address = 0x10000;
+                logger(`[警告] Server 未提供地址，使用檔名推斷: ${name} → 0x${address.toString(16)}`);
             }
+
+            const data = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+            fileArray.push({ data, address });
+            logger(`  ${name} → 0x${address.toString(16).toUpperCase()} (${data.length} bytes)`);
         }
 
-        if (fileArray.length === 0) throw new Error("編譯結果中找不到任何 .bin 檔案");
-        
+        if (fileArray.length === 0) throw new Error("編譯結果中找不到任何可燒錄的 .bin 檔案");
         logger(`準備燒錄 ${fileArray.length} 個分區...`);
         await flasher.flashData(fileArray);
     }
