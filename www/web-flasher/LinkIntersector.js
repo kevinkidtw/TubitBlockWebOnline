@@ -20,6 +20,7 @@
     let cachedFlashAddresses = null;  // 對應的 flash 地址映射（由 server 回傳）
     let cachedCodeHash = null;        // 用來判斷程式碼是否已變更
     let isCompiling = false;          // 防止重複點擊
+    let isUploading = false;          // 燒錄進行中（防止燒錄期間觸發編譯）
     
     // --- 階段 1：DOM 監聽與「編譯」按鈕注入 ---
     function injectCompileButton() {
@@ -88,14 +89,20 @@
         fakeWs.onopen = null; fakeWs.onclose = null; fakeWs.onerror = null; fakeWs.onmessage = null;
         fakeWs.bufferedAmount = 0; fakeWs.extensions = ''; fakeWs.protocol = ''; fakeWs.binaryType = 'blob';
 
-        // 包裝 dispatchEvent，同時觸發 on* 屬性回呼
-        const _baseDispatch = EventTarget.prototype.dispatchEvent.bind(fakeWs);
-        fakeWs.dispatchEvent = function (evt) {
-            const r = _baseDispatch(evt);
-            const h = fakeWs['on' + evt.type];
-            if (typeof h === 'function') h.call(fakeWs, evt);
-            return r;
-        };
+        // 用 property setter 讓 on* 屬性透過 addEventListener 註冊，
+        // 避免 dispatchEvent 重複觸發（舊做法會讓 addEventListener + onmessage 同時存在時訊息重複）
+        ['open', 'close', 'error', 'message'].forEach(type => {
+            let _h = null;
+            Object.defineProperty(fakeWs, 'on' + type, {
+                get() { return _h; },
+                set(fn) {
+                    if (_h) fakeWs.removeEventListener(type, _h);
+                    _h = fn;
+                    if (fn) fakeWs.addEventListener(type, fn);
+                },
+                configurable: true
+            });
+        });
 
         fakeWs.send = function (data) {
             try {
@@ -164,11 +171,19 @@
         const { id } = originalRequest;
         try {
             if (!window.serialManager) throw new Error("SerialManager not initialized");
-            console.log('[Intersector] 請求 Web Serial 存取權...');
-            await window.serialManager.requestPort();
-            await window.serialManager.open(115200); 
-            
-            console.log('[Intersector] 連線成功！回報給 GUI');
+
+            if (window.serialManager.isOpen) {
+                // 燒錄後序列埠已重新開啟，無需再次請求，直接回報連線成功
+                console.log('[Intersector] 序列埠已開啟，直接回報連線成功。');
+            } else {
+                console.log('[Intersector] 請求 Web Serial 存取權...');
+                if (!window.serialManager.port) {
+                    await window.serialManager.requestPort();
+                }
+                await window.serialManager.open(115200);
+                console.log('[Intersector] 連線成功！');
+            }
+
             injectMessage(ws, {
                 jsonrpc: "2.0",
                 id: id,
@@ -221,6 +236,10 @@
     }
 
     async function handleCompileOnly(buttonElement) {
+        if (isUploading) {
+            alert('正在燒錄中，請等待燒錄完成後再編譯。');
+            return;
+        }
         if (isCompiling) {
             console.log('[Intersector] 正在編譯中，請稍候...');
             return;
@@ -238,8 +257,11 @@
 
             // 取得當前程式碼
             const currentCode = getCurrentCodeFromGUI();
-            if (!currentCode) {
+            if (!currentCode || currentCode.trim().length < 20) {
                 throw new Error('無法從編輯器取得程式碼。請確認已選擇裝置並切換到程式碼檢視。');
+            }
+            if (!currentCode.includes('void setup') && !currentCode.includes('void loop')) {
+                throw new Error('程式碼不完整（找不到 void setup 或 void loop）。請切換到程式碼檢視後再試。');
             }
 
             const codeHash = simpleHash(currentCode);
@@ -302,6 +324,8 @@
             });
         };
 
+        isUploading = true;
+
         try {
             // --- 重大修復：SecurityError ---
             // Web Serial 的 requestPort 必須在「使用者手勢」(User Gesture) 的 call stack 裡面執行。
@@ -311,9 +335,19 @@
                 logger("偵測到序列埠尚未連線，正在請求存取權限...");
                 await window.serialManager.requestPort();
                 // 先用 115200 開啟（之後閃爍時會自動調整，或者是這裡直接用 460800 也可以）
-                await window.serialManager.open(115200); 
+                await window.serialManager.open(115200);
                 logger("序列埠已就緒。");
             }
+
+            // --- 提早回覆 JSON-RPC result，防止 GUI 因等待 >10 秒而顯示「上傳超時」---
+            // 燒錄 ESP32 約需 20-30 秒，遠超過 GUI 的 JSON-RPC timeout。
+            // 提前送出 result:null 讓 GUI 確認 RPC 已被接受，
+            // 後續進度訊息 (uploadStdout) 與完成通知 (uploadSuccess) 仍會正常送到。
+            injectMessage(ws, {
+                jsonrpc: "2.0",
+                id: id,
+                result: null
+            });
 
             let artifacts;
             let flashAddresses;
@@ -374,13 +408,7 @@
             cachedCodeHash = null;
 
             logger('燒錄流程全數完成！');
-            
-            injectMessage(ws, {
-                jsonrpc: "2.0",
-                id: id,
-                result: "Success"
-            });
-            
+
             injectMessage(ws, {
                 jsonrpc: "2.0",
                 method: "uploadSuccess",
@@ -390,12 +418,14 @@
         } catch (e) {
             console.error('[Intersector] 錯誤:', e);
             logger(`[錯誤] ${e.message}`);
-            
+
             injectMessage(ws, {
                 jsonrpc: "2.0",
                 method: "uploadError",
                 params: { message: `\x1b[31m${e.message}\x1b[0m` }
             });
+        } finally {
+            isUploading = false;
         }
     }
 

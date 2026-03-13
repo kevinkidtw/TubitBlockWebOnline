@@ -281,7 +281,7 @@ http://localhost:8080/www/index.html
 
 ### Q4：燒錄完成後再次點擊上傳，需要 F5 重整
 
-這是正常現象。燒錄流程結束後，系統會自動嘗試重新開啟序列埠（訊息視窗顯示「序列埠已恢復，可直接再次上傳」）。若顯示「序列埠未自動重開」，則按 F5 重整後重新連接即可。
+燒錄完成後，系統會自動重新開啟序列埠（訊息視窗顯示「序列埠已恢復，可直接再次上傳」），接著點擊「連接」可直接重新連線，**不需按 F5**。若顯示「序列埠未自動重開」，才需要 F5 重整後重新連接。
 
 ### Q5：每次上課都要重新選擇序列埠嗎？
 
@@ -463,7 +463,30 @@ TubitBlockWeb線上編譯版/
 
 ## 十、版本更新紀錄
 
-### 目前版本（線上編譯版）
+### v1.12（目前版本）
+
+**問題修復：**
+
+- **修復 GUI 上傳超時**：ESP32 燒錄約需 20~30 秒，超過 GUI 的 JSON-RPC 內部 timeout，導致訊息視窗顯示「上傳超時」，即使燒錄實際成功。修復方式：在取得序列埠後立即提前回覆 JSON-RPC 確認訊息（`result: null`），GUI 不再等待整個燒錄過程；燒錄進度與完成通知仍會正常顯示。
+
+- **修復燒錄期間點擊「編譯」導致第二次編譯失敗**：燒錄進行中時 GUI 切換至上傳進度視圖，此時 `getCurrentCodeFromGUI()` 讀取的並非正確程式碼，會送出殘缺的程式碼造成 400 編譯錯誤。修復方式：新增 `isUploading` 旗標，燒錄進行中點擊「編譯」會顯示提示「正在燒錄中，請等待燒錄完成後再編譯」；同時加強程式碼合法性驗證（長度過短或缺少 `void setup/loop` 時拒絕送出）。
+
+- **修復 GUI 燒錄訊息重複顯示**：GUI 訊息視窗中每條燒錄進度訊息會出現兩次。原因：假 WebSocket 物件（`createFakeLinkWebSocket`）的 `dispatchEvent` 覆寫同時觸發了 `addEventListener` 監聽器與 `on*` 屬性處理器，造成重複派送。修復方式：改用 `Object.defineProperty` setter，讓 `on*` 屬性透過 `addEventListener` 統一管理，使用原生 EventTarget 派送，每條訊息只觸發一次。
+
+- **修復燒錄後重新連接需要 F5**：燒錄完成後點擊「連接」，若序列埠已在燒錄後自動重開，現在直接回報連線成功，不再彈出瀏覽器序列埠選擇器。
+
+- **修復跨來源存取被封鎖 (CORS)**：從 GitHub Pages 等外部網址存取編譯伺服器時，Synology NAS nginx 的 60 秒 timeout 會在編譯完成前超時並回傳無 CORS 標頭的 Synology 錯誤頁面，導致瀏覽器顯示 CORS 錯誤。修復方式：將 nginx `proxy_read_timeout` / `proxy_send_timeout` 延長至 300 秒，並加入 `add_header 'Access-Control-Allow-Origin' '*' always` 確保所有回應（含錯誤頁）皆帶有 CORS 標頭；使用 `proxy_hide_header` 避免 CORS 標頭重複。
+
+- **修復 libTuBitCore.a ABI 版本不符**：Docker 容器原使用 `esp32:esp32@3.1.1`，但 `custom_libraries/TuBitCore` 的預編譯靜態庫是針對 ESP32 core 3.1.3 編譯，導致燒錄後韌體執行期崩潰或無回應。修復方式：`Dockerfile` 改用 `esp32:esp32@3.1.3`，版本與靜態庫 ABI 一致。
+
+**外觀更新：**
+
+- 瀏覽器分頁圖示（favicon）、書籤圖示與縮圖 logo 改為 TuBit 橘色方塊圖示
+- 頁面標題改為「TubitBlock Web」
+
+---
+
+### v1.1
 
 - **零安裝架構**：移除 `tubitblock-link` 本機服務，改以雲端 Docker 編譯 + 瀏覽器 Web Serial 燒錄
 - **WebSocket 攔截器**：`LinkIntersector.js` 攔截 GUI 的上傳請求，無縫接入雲端編譯流程
@@ -471,8 +494,7 @@ TubitBlockWeb線上編譯版/
 - **正確 ESP32 燒錄分區**：伺服器明確回傳每個 `.bin` 檔的燒錄地址（`flashAddresses`），包含自動注入 `boot_app0.bin`
 - **完整 FQBN 支援**：使用含 `FlashMode=qio,FlashFreq=80,CPUFreq=240` 等完整選項的 FQBN 進行編譯，確保與桌面版行為一致
 - **二次重置機制**：燒錄後自動透過 Web Serial 發送 200ms RTS 重置脈衝，提升自動重啟成功率
-- **自動重開序列埠**：燒錄完成後自動恢復序列埠連線，減少需要按 F5 重整的情況
-- **訊息不重複**：修復燒錄訊息在 GUI 視窗重複輸出的問題
+- **自動重開序列埠**：燒錄完成後自動嘗試恢復序列埠連線
 
 ---
 
