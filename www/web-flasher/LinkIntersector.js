@@ -360,13 +360,26 @@
             } else {
                 // 沒有快取：走原本的編譯流程
                 logger(`正在發起線上編譯 (${COMPILE_SERVER_URL})...`);
+                logger(`⏳ 等待雲端編譯中，請稍候...（依程式複雜度，約需 30 秒至 2 分鐘）`);
 
-                // 嘗試兩種請求格式：先用 GUI 原生的 params，再用簡潔版
-                const response = await fetch(COMPILE_SERVER_URL, {
-                    method: 'POST',
-                    body: JSON.stringify(params),
-                    headers: { 'Content-Type': 'application/json' }
-                });
+                // 每 15 秒送一次提示，避免使用者誤以為當機
+                let waitSecs = 15;
+                const compileHeartbeat = setInterval(() => {
+                    logger(`⏳ 仍在編譯中，已等待約 ${waitSecs} 秒，請繼續等候...`);
+                    waitSecs += 15;
+                }, 15000);
+
+                let response;
+                try {
+                    // 嘗試兩種請求格式：先用 GUI 原生的 params，再用簡潔版
+                    response = await fetch(COMPILE_SERVER_URL, {
+                        method: 'POST',
+                        body: JSON.stringify(params),
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                } finally {
+                    clearInterval(compileHeartbeat);
+                }
 
                 if (!response.ok) {
                     const errData = await response.json();
