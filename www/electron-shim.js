@@ -234,12 +234,112 @@
         console.log('[TUbitBlock Web] URL redirect interceptors installed.');
     })();
 
+    // ---- Mini ZIP reader: extract project.json from .tb/.sb3/.ob archives ----
+    function extractProjectJSONFromZip(arrayBuffer) {
+        return new Promise(function (resolve, reject) {
+            var bytes = new Uint8Array(arrayBuffer);
+            // Find EOCD signature from end of file
+            var eocd = -1;
+            for (var i = bytes.length - 22; i >= 0; i--) {
+                if (bytes[i]===0x50&&bytes[i+1]===0x4B&&bytes[i+2]===0x05&&bytes[i+3]===0x06) { eocd=i; break; }
+            }
+            if (eocd === -1) { reject(new Error('Not a ZIP file')); return; }
+            var numEntries = bytes[eocd+8]  | (bytes[eocd+9]<<8);
+            var cdOffset   = bytes[eocd+16] | (bytes[eocd+17]<<8) | (bytes[eocd+18]<<16) | (bytes[eocd+19]<<24);
+            var pos = cdOffset;
+            for (var n = 0; n < numEntries; n++) {
+                if (bytes[pos]!==0x50||bytes[pos+1]!==0x4B||bytes[pos+2]!==0x01||bytes[pos+3]!==0x02) break;
+                var method = bytes[pos+10]|(bytes[pos+11]<<8);
+                var compSz = bytes[pos+20]|(bytes[pos+21]<<8)|(bytes[pos+22]<<16)|(bytes[pos+23]<<24);
+                var fnLen  = bytes[pos+28]|(bytes[pos+29]<<8);
+                var exLen  = bytes[pos+30]|(bytes[pos+31]<<8);
+                var cmtLen = bytes[pos+32]|(bytes[pos+33]<<8);
+                var lhOff  = bytes[pos+42]|(bytes[pos+43]<<8)|(bytes[pos+44]<<16)|(bytes[pos+45]<<24);
+                var fname  = new TextDecoder().decode(bytes.subarray(pos+46, pos+46+fnLen));
+                if (fname === 'project.json') {
+                    var lhFnLen = bytes[lhOff+26]|(bytes[lhOff+27]<<8);
+                    var lhExLen = bytes[lhOff+28]|(bytes[lhOff+29]<<8);
+                    var dataOff = lhOff + 30 + lhFnLen + lhExLen;
+                    var comp    = bytes.subarray(dataOff, dataOff + compSz);
+                    if (method === 0) { resolve(new TextDecoder().decode(comp)); return; }
+                    if (method === 8) {
+                        var ds = new DecompressionStream('deflate-raw');
+                        var wr = ds.writable.getWriter(), rd = ds.readable.getReader(), chunks = [];
+                        wr.write(comp); wr.close();
+                        (function pump() {
+                            rd.read().then(function(r) {
+                                if (r.done) {
+                                    var total=chunks.reduce(function(a,c){return a+c.length;},0), out=new Uint8Array(total), off=0;
+                                    chunks.forEach(function(c){out.set(c,off);off+=c.length;});
+                                    resolve(new TextDecoder().decode(out));
+                                } else { chunks.push(r.value); pump(); }
+                            }).catch(reject);
+                        })();
+                        return;
+                    }
+                    reject(new Error('Unsupported ZIP compression method: ' + method)); return;
+                }
+                pos += 46 + fnLen + exLen + cmtLen;
+            }
+            reject(new Error('project.json not found in ZIP'));
+        });
+    }
+
     // ---- @electron/remote shim ----
     const remoteModule = {
         dialog: {
             showMessageBox: function () { return Promise.resolve({ response: 0 }); },
             showMessageBoxSync: function () { return 0; },
-            showOpenDialog: function () { return Promise.resolve({ canceled: true, filePaths: [] }); },
+            showOpenDialog: function (options) {
+                return new Promise(function (resolve) {
+                    var input = document.createElement('input');
+                    input.type = 'file';
+                    // 不設定 accept：macOS 對未登錄副檔名（.tb）會過濾導致無法選擇；
+                    // 內容驗證（ZIP magic bytes）已在後面進行，不需要靠 accept 篩選
+                    input.style.display = 'none';
+                    document.body.appendChild(input);
+                    var handled = false;
+                    input.addEventListener('change', function () {
+                        if (handled) return; handled = true;
+                        if (input.parentNode) document.body.removeChild(input);
+                        var file = input.files && input.files[0];
+                        if (!file) { resolve({ canceled: true, filePaths: [] }); return; }
+                        var reader = new FileReader();
+                        reader.onload = function (e) {
+                            var buf = e.target.result;
+                            var header = new Uint8Array(buf, 0, 4);
+                            if (header[0]===0x50 && header[1]===0x4B) {
+                                // ZIP 格式（.tb/.sb3/.ob）→ 解壓取出 project.json
+                                extractProjectJSONFromZip(buf).then(function (json) {
+                                    window._pendingProjectJSON = json;
+                                    resolve({ canceled: false, filePaths: ['/pending-project.tb'] });
+                                }).catch(function (err) {
+                                    console.error('[Web] 無法從 ZIP 取出 project.json:', err);
+                                    resolve({ canceled: true, filePaths: [] });
+                                });
+                            } else {
+                                // 純 JSON 格式
+                                window._pendingProjectJSON = new TextDecoder().decode(buf);
+                                resolve({ canceled: false, filePaths: ['/pending-project.tb'] });
+                            }
+                        };
+                        reader.onerror = function () { resolve({ canceled: true, filePaths: [] }); };
+                        reader.readAsArrayBuffer(file);
+                    });
+                    // 偵測使用者取消（焦點回到視窗但未選擇檔案）
+                    window.addEventListener('focus', function onFocus() {
+                        window.removeEventListener('focus', onFocus);
+                        setTimeout(function () {
+                            if (!handled) {
+                                handled = true;
+                                if (input.parentNode) document.body.removeChild(input);
+                                resolve({ canceled: true, filePaths: [] });
+                            }
+                        }, 300);
+                    });
+                    input.click();
+                });
+            },
             showSaveDialog: function () { return Promise.resolve({ canceled: true }); }
         },
         getCurrentWindow: function () {
@@ -263,6 +363,13 @@
     // ---- fs shim (minimal) ----
     const fsModule = {
         readFile: function (path, cb) {
+            // 回傳使用者選擇的待載入專案 JSON
+            if (path === '/pending-project.tb' && window._pendingProjectJSON) {
+                var _json = window._pendingProjectJSON;
+                window._pendingProjectJSON = null;
+                if (cb) setTimeout(function () { cb(null, _json); }, 0);
+                return;
+            }
             // Attempt to fetch the file from the web server instead
             fetch(path.replace(/^.*\/static\//, 'static/'))
                 .then(function (res) { return res.arrayBuffer(); })
@@ -1151,9 +1258,35 @@
                     } else if (typeof input === 'object' && !(input instanceof ArrayBuffer) && !ArrayBuffer.isView(input)) {
                         projectJSON = input;
                     } else if (input instanceof ArrayBuffer || ArrayBuffer.isView(input)) {
-                        // Binary input — could be a .sb3 zip or .sb2 binary
-                        // Fall back to original loadProject for binary data
-                        console.log('[TUbitBlock Web] Binary project data, using original loadProject');
+                        // Binary input — extract project.json from ZIP (.tb/.sb3/.ob)
+                        var buf = input instanceof ArrayBuffer ? input : input.buffer;
+                        var header = new Uint8Array(buf, 0, 4);
+                        if (header[0] === 0x50 && header[1] === 0x4B) {
+                            return extractProjectJSONFromZip(buf).then(function (json) {
+                                var pj;
+                                try { pj = JSON.parse(json); } catch (e) { pj = json; }
+                                if (pj.targets && pj.meta) {
+                                    pj.projectVersion = 3;
+                                } else if (pj.objName) {
+                                    pj.projectVersion = 2;
+                                } else {
+                                    return origLoadProject(input);
+                                }
+                                return vm.deserializeProject(pj, null)
+                                    .then(function () {
+                                        vm.runtime.emitProjectLoaded();
+                                        console.log('[TUbitBlock Web] Project loaded successfully, targets:', vm.runtime.targets.length);
+                                    })
+                                    .catch(function (error) {
+                                        console.error('[TUbitBlock Web] deserializeProject failed:', error);
+                                        return Promise.reject(error);
+                                    });
+                            }).catch(function (err) {
+                                console.error('[TUbitBlock Web] Failed to extract ZIP:', err);
+                                return origLoadProject(input);
+                            });
+                        }
+                        console.log('[TUbitBlock Web] Binary project data (non-ZIP), using original loadProject');
                         return origLoadProject(input);
                     } else {
                         projectJSON = JSON.parse(JSON.stringify(input));
