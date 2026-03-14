@@ -463,7 +463,20 @@ TubitBlockWeb線上編譯版/
 
 ## 十、版本更新紀錄
 
-### v1.12（目前版本）
+### v1.1（目前版本）— 2026-03-15
+
+**新增功能：**
+
+- **專案檔儲存與載入（.tb 格式）**：在瀏覽器環境中完整實作 `.tb` 專案檔的儲存與載入功能。
+  - 儲存：攔截 GUI 的 `<a download>` 動作，將副檔名統一為 `.tb`。
+  - 載入：替換原本永遠回傳「取消」的 `showOpenDialog` stub，改以真實的 `<input type="file">` 檔案選擇器實作；透過純 JavaScript ZIP 解壓縮（EOCD 掃描 + `DecompressionStream('deflate-raw')`）從 `.tb` 檔讀取 `project.json`，並繞過 GUI 內部已損壞的 AJV 版本驗證器，直接呼叫 `deserializeProject()` 還原積木程式與設備選擇。
+  - 相容 `.sb3`、`.ob`、`.tb` 三種副檔名（ZIP 格式均可正確解壓）。
+
+- **修復編譯進度訊息未即時顯示**：雲端編譯開始時，「⏳ 等待雲端編譯中…」提示訊息未立即出現於 GUI 訊息視窗。根本原因：`result: null` 與 `uploadStdout` 訊息在同一個同步 event loop tick 內連續送出，React 尚未完成面板的 re-render，導致訊息遺失。修復方式：在送出 `result: null` 後插入 200ms 延遲，確保 GUI 面板渲染完成再送出進度訊息。
+
+---
+
+### v1.12
 
 **問題修復：**
 

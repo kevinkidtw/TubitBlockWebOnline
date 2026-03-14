@@ -349,6 +349,9 @@
                 result: null
             });
 
+            // 等待 GUI 處理 result 並 re-render 出 console 面板後，再送 uploadStdout
+            await new Promise(resolve => setTimeout(resolve, 200));
+
             let artifacts;
             let flashAddresses;
 
