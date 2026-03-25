@@ -1,7 +1,7 @@
 /* eslint-disable func-style */
 /* eslint-disable max-len */
 /* eslint-disable require-jsdoc */
-function registerGenerators (Blockly) {
+function registerGenerators(Blockly) {
 
 
     Blockly.Arduino.tubitv2mtc_setcpr = function (block) {
@@ -15,7 +15,7 @@ function registerGenerators (Blockly) {
     Blockly.Arduino.tubitv2mtc_setpid = function (block) {
         Blockly.Arduino.includes_.tubitv2mtc = `#include <TuMTC.h>`;
         Blockly.Arduino.definitions_.tubitv2mtc = `TuMTC mtc(tubit);`;
-        
+
         const p = Blockly.Arduino.valueToCode(block, 'P', Blockly.Arduino.ORDER_ATOMIC);
         const i = Blockly.Arduino.valueToCode(block, 'I', Blockly.Arduino.ORDER_ATOMIC);
         const d = Blockly.Arduino.valueToCode(block, 'D', Blockly.Arduino.ORDER_ATOMIC);
@@ -50,7 +50,7 @@ function registerGenerators (Blockly) {
     Blockly.Arduino.tubitv2mtc_setxyrdata = function (block) {
         Blockly.Arduino.includes_.tubitv2mtc = `#include <TuMTC.h>`;
         Blockly.Arduino.definitions_.tubitv2mtc = `TuMTC mtc(tubit);`;
-        const  wh= Blockly.Arduino.valueToCode(block, 'WH', Blockly.Arduino.ORDER_ATOMIC);
+        const wh = Blockly.Arduino.valueToCode(block, 'WH', Blockly.Arduino.ORDER_ATOMIC);
         const ww = Blockly.Arduino.valueToCode(block, 'WW', Blockly.Arduino.ORDER_ATOMIC);
         const mh = Blockly.Arduino.valueToCode(block, 'MH', Blockly.Arduino.ORDER_ATOMIC);
         const mw = Blockly.Arduino.valueToCode(block, 'MW', Blockly.Arduino.ORDER_ATOMIC);
@@ -90,7 +90,7 @@ function registerGenerators (Blockly) {
         return `mtc.moveSCurve(${x},${y},${r},${vm},${a},${ad},${vs},${ve});\n`;
     };
 
-        Blockly.Arduino.tubitv2mtc_amovecurve = function (block) {
+    Blockly.Arduino.tubitv2mtc_amovecurve = function (block) {
         Blockly.Arduino.includes_.tubitv2mtc = `#include <TuMTC.h>`;
         Blockly.Arduino.definitions_.tubitv2mtc = `TuMTC mtc(tubit);`;
         const x = Blockly.Arduino.valueToCode(block, 'X', Blockly.Arduino.ORDER_ATOMIC);
@@ -116,7 +116,7 @@ function registerGenerators (Blockly) {
         const ve = Blockly.Arduino.valueToCode(block, 'VE', Blockly.Arduino.ORDER_ATOMIC);
         return `mtc.moveCurveSCurve(${x},${y},${r},${bulge},${vm},${a},${ad},${vs},${ve});\n`;
     };
- 
+
     Blockly.Arduino.tubitv2mtc_setbodydeg = function (block) {
         Blockly.Arduino.includes_.tubitv2mtc = `#include <TuMTC.h>`;
         Blockly.Arduino.definitions_.tubitv2mtc = `TuMTC mtc(tubit);`;
@@ -141,7 +141,7 @@ function registerGenerators (Blockly) {
         code += branch.slice(2).replace(/\n  /g, '\n');
         code += `}\n`
 
-        Blockly.Arduino.definitions_['TUBITV2_mtc' + vn] =code;
+        Blockly.Arduino.definitions_['TUBITV2_mtc' + vn] = code;
         return '';
     };
 
@@ -175,44 +175,44 @@ function registerGenerators (Blockly) {
         }
     };
 
-     /*
-    Blockly.Arduino.tubitv2mtc_movestartevent = function (block) {
+    /*
+   Blockly.Arduino.tubitv2mtc_movestartevent = function (block) {
 
-        var branch = Blockly.Arduino.statementToCode(block, 'SUBSTACK');
+       var branch = Blockly.Arduino.statementToCode(block, 'SUBSTACK');
 
-        let code = `void onMoveStart() {\n`;
-        code += branch.slice(2).replace(/\n  /g, '\n');
-        code += `}\n`
+       let code = `void onMoveStart() {\n`;
+       code += branch.slice(2).replace(/\n  /g, '\n');
+       code += `}\n`
 
-        Blockly.Arduino.definitions_.tubitv2mtc_movestartevent =code;
-        Blockly.Arduino.setups_.tubitv2mtc_movestartevent = 'tubit.setMoveStartCallback(onMoveStart);';
-        return '';
-    };
+       Blockly.Arduino.definitions_.tubitv2mtc_movestartevent =code;
+       Blockly.Arduino.setups_.tubitv2mtc_movestartevent = 'tubit.setMoveStartCallback(onMoveStart);';
+       return '';
+   };
 
-    Blockly.Arduino.tubitv2mtc_moveloopevent = function (block) {
+   Blockly.Arduino.tubitv2mtc_moveloopevent = function (block) {
 
-        var branch = Blockly.Arduino.statementToCode(block, 'SUBSTACK');
+       var branch = Blockly.Arduino.statementToCode(block, 'SUBSTACK');
 
-        let code = `void onEachLoop() {\n`;
-        code += branch.slice(2).replace(/\n  /g, '\n');
-        code += `}\n`
+       let code = `void onEachLoop() {\n`;
+       code += branch.slice(2).replace(/\n  /g, '\n');
+       code += `}\n`
 
-        Blockly.Arduino.definitions_.tubitv2mtc_moveloopevent =code;
-        Blockly.Arduino.setups_.tubitv2mtc_moveloopevent = 'tubit.setMoveLoopCallback(onEachLoop);';
-        return '';
-    };
+       Blockly.Arduino.definitions_.tubitv2mtc_moveloopevent =code;
+       Blockly.Arduino.setups_.tubitv2mtc_moveloopevent = 'tubit.setMoveLoopCallback(onEachLoop);';
+       return '';
+   };
 
-   
-    Blockly.Arduino.tubitv2mtc_gcsmove = function (block) {
-        const x = Blockly.Arduino.valueToCode(block, 'X', Blockly.Arduino.ORDER_ATOMIC);
-        const y = Blockly.Arduino.valueToCode(block, 'Y', Blockly.Arduino.ORDER_ATOMIC);
-        const z = Blockly.Arduino.valueToCode(block, 'Z', Blockly.Arduino.ORDER_ATOMIC);
-        const sec = Blockly.Arduino.valueToCode(block, 'SEC', Blockly.Arduino.ORDER_ATOMIC);
-        const rkp = Blockly.Arduino.valueToCode(block, 'RKP', Blockly.Arduino.ORDER_ATOMIC);
-        const nowz = Blockly.Arduino.valueToCode(block, 'NOWZ', Blockly.Arduino.ORDER_ATOMIC);
-        return `tubit.MTC_GCS_MOVE(${x}, ${y}, ${z}, ${sec}, ${rkp}, &(${nowz}));\n`;
-    };
-   */
+  
+   Blockly.Arduino.tubitv2mtc_gcsmove = function (block) {
+       const x = Blockly.Arduino.valueToCode(block, 'X', Blockly.Arduino.ORDER_ATOMIC);
+       const y = Blockly.Arduino.valueToCode(block, 'Y', Blockly.Arduino.ORDER_ATOMIC);
+       const z = Blockly.Arduino.valueToCode(block, 'Z', Blockly.Arduino.ORDER_ATOMIC);
+       const sec = Blockly.Arduino.valueToCode(block, 'SEC', Blockly.Arduino.ORDER_ATOMIC);
+       const rkp = Blockly.Arduino.valueToCode(block, 'RKP', Blockly.Arduino.ORDER_ATOMIC);
+       const nowz = Blockly.Arduino.valueToCode(block, 'NOWZ', Blockly.Arduino.ORDER_ATOMIC);
+       return `tubit.MTC_GCS_MOVE(${x}, ${y}, ${z}, ${sec}, ${rkp}, &(${nowz}));\n`;
+   };
+  */
     return Blockly;
 }
 

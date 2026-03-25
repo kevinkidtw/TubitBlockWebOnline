@@ -21,6 +21,8 @@
     let cachedCodeHash = null;        // 用來判斷程式碼是否已變更
     let isCompiling = false;          // 防止重複點擊
     let isUploading = false;          // 燒錄進行中（防止燒錄期間觸發編譯）
+    let isSerialReading = false;      // GUI 是否已啟動串口讀取（read 方法觸發）
+    let activeFakeWs = null;          // 當前活動的 fake WebSocket 引用（用於 onDataReceived）
     
     // --- 階段 1：DOM 監聽與「編譯」按鈕注入 ---
     function injectCompileButton() {
@@ -113,6 +115,9 @@
                     if (method === 'upload')   { handleInterceptedUpload(fakeWs, json);   return; }
                     if (method === 'discover') { handleInterceptedDiscover(fakeWs, json); return; }
                     if (method === 'connect')  { handleInterceptedConnect(fakeWs, json);  return; }
+                    if (method === 'read')     { handleInterceptedRead(fakeWs, json);    return; }
+                    if (method === 'write')    { handleInterceptedWrite(fakeWs, json);   return; }
+                    if (method === 'disconnect') { handleInterceptedDisconnect(fakeWs, json); return; }
                 }
             } catch (e) {}
             console.log('[Intersector] Unhandled WS send:', data);
@@ -149,7 +154,7 @@
         const event = new MessageEvent('message', {
             data: JSON.stringify(data)
         });
-        console.log('[Intersector] Injecting message to GUI:', data.method || 'response', data);
+        console.log('[Intersector] Injecting message to GUI:', data.method || 'response', data.method === 'onMessage' ? '(serial data)' : data);
         // dispatchEvent 已被覆寫，內部會自動呼叫 onmessage，無需額外呼叫
         ws.dispatchEvent(event);
     }
@@ -184,6 +189,26 @@
                 console.log('[Intersector] 連線成功！');
             }
 
+            // 連線成功後，設定 serial data callback 以便之後 read 時轉發資料
+            activeFakeWs = ws;
+            window.serialManager.onDataReceived = function (value) {
+                if (!isSerialReading || isUploading) return;
+                // 將 Uint8Array 轉為 base64（符合 OpenBlock Link 原始協議）
+                let binary = '';
+                for (let i = 0; i < value.length; i++) {
+                    binary += String.fromCharCode(value[i]);
+                }
+                const base64 = btoa(binary);
+                injectMessage(activeFakeWs, {
+                    jsonrpc: "2.0",
+                    method: "onMessage",
+                    params: {
+                        encoding: 'base64',
+                        message: base64
+                    }
+                });
+            };
+
             injectMessage(ws, {
                 jsonrpc: "2.0",
                 id: id,
@@ -195,6 +220,68 @@
                 jsonrpc: "2.0",
                 id: id,
                 error: { message: e.message }
+            });
+        }
+    }
+
+    // --- Serial Read：GUI 通知開始接收串口資料 ---
+    async function handleInterceptedRead(ws, originalRequest) {
+        isSerialReading = true;
+        console.log('[Intersector] Serial Read 已啟動，開始轉發串口資料到 GUI');
+        // read 是 notification，不需要 id 回覆
+    }
+
+    // --- Serial Write：GUI 發送資料到串口 ---
+    async function handleInterceptedWrite(ws, originalRequest) {
+        const { id, params } = originalRequest;
+        try {
+            if (!window.serialManager || !window.serialManager.isOpen) {
+                throw new Error('序列埠尚未連線');
+            }
+            const { message, encoding } = params;
+            let bytes;
+            if (encoding === 'base64') {
+                const binary = atob(message);
+                bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
+            } else {
+                bytes = new TextEncoder().encode(message);
+            }
+            await window.serialManager.write(bytes);
+            injectMessage(ws, {
+                jsonrpc: "2.0",
+                id: id,
+                result: bytes.length
+            });
+        } catch (e) {
+            console.error('[Intersector] Serial Write 失敗:', e);
+            injectMessage(ws, {
+                jsonrpc: "2.0",
+                id: id,
+                error: { message: e.message }
+            });
+        }
+    }
+
+    // --- Disconnect：斷開串口連線 ---
+    async function handleInterceptedDisconnect(ws, originalRequest) {
+        const { id } = originalRequest;
+        isSerialReading = false;
+        activeFakeWs = null;
+        if (window.serialManager) {
+            window.serialManager.onDataReceived = null;
+            if (window.serialManager.isOpen) {
+                await window.serialManager.close();
+            }
+        }
+        console.log('[Intersector] 序列埠已斷開');
+        if (id) {
+            injectMessage(ws, {
+                jsonrpc: "2.0",
+                id: id,
+                result: null
             });
         }
     }
