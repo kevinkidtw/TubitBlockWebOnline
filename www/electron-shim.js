@@ -1460,9 +1460,9 @@
             }
         })();
 
-        // ---- Monkey-patch 攔截存檔副檔名 (將 .ob / .sb3 改為 .tb) ----
+        // ---- Monkey-patch 攔截存檔副檔名/上傳副檔名 ----
         (function () {
-            // 攔截 a.download = 'xxx.ob'
+            // 1. 攔截 a.download = 'xxx.ob'
             var anchorDesc = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'download');
             if (anchorDesc && anchorDesc.set) {
                 var origAnchorSet = anchorDesc.set;
@@ -1480,12 +1480,32 @@
                 });
             }
 
-            // 攔截 a.setAttribute('download', 'xxx.ob')
+            // 2. 攔截 input.accept = '.sb2,.sb3' (React 常用)
+            var inputAcceptDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'accept');
+            if (inputAcceptDesc && inputAcceptDesc.set) {
+                var origAcceptSet = inputAcceptDesc.set;
+                Object.defineProperty(HTMLInputElement.prototype, 'accept', {
+                    get: inputAcceptDesc.get,
+                    set: function (val) {
+                        if (typeof val === 'string' && val.indexOf('.sb3') >= 0 && val.indexOf('.tb') < 0) {
+                            val = val + ',.tb';
+                        }
+                        return origAcceptSet.call(this, val);
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+            }
+
+            // 3. 攔截 a.setAttribute('download', ...) 和 input.setAttribute('accept', ...)
             var _origSetAttribute = Element.prototype.setAttribute;
             Element.prototype.setAttribute = function (name, value) {
                 if (name === 'download' && typeof value === 'string') {
                     value = value.replace(/\.(ob|sb3)$/i, '.tb');
                     value = patchText(value);
+                }
+                if (name === 'accept' && typeof value === 'string' && value.indexOf('.sb3') >= 0 && value.indexOf('.tb') < 0) {
+                    value = value + ',.tb';
                 }
                 return _origSetAttribute.call(this, name, value);
             };
