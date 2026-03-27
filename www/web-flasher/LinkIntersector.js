@@ -429,59 +429,15 @@
         const originalText = buttonElement.querySelector('span')?.textContent || '編譯 (' + getCompileModeLabel() + ')';
         const textSpan = buttonElement.querySelector('span');
 
-        // === 建立或取得浮動訊息面板 ===
-        let panel = document.getElementById('web-flasher-compile-panel');
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.id = 'web-flasher-compile-panel';
-            panel.style.cssText = 
-                'position:fixed;bottom:0;left:0;right:0;height:220px;' +
-                'background:#1e1e1e;color:#d4d4d4;font-family:Consolas,Monaco,"Courier New",monospace;' +
-                'font-size:13px;overflow-y:auto;z-index:99999;' +
-                'border-top:2px solid #007acc;padding:8px 12px;' +
-                'transition:transform 0.3s ease;transform:translateY(100%);';
-            // 標題列
-            const header = document.createElement('div');
-            header.style.cssText = 
-                'display:flex;justify-content:space-between;align-items:center;' +
-                'margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #333;';
-            header.innerHTML = '<span style="color:#569cd6;font-weight:bold;">📋 編譯輸出</span>';
-            const closeBtn = document.createElement('span');
-            closeBtn.textContent = '✕';
-            closeBtn.style.cssText = 'cursor:pointer;color:#888;padding:2px 6px;font-size:16px;';
-            closeBtn.onclick = () => { panel.style.transform = 'translateY(100%)'; };
-            header.appendChild(closeBtn);
-            panel.appendChild(header);
-            // 內容區
-            const content = document.createElement('div');
-            content.id = 'web-flasher-compile-panel-content';
-            content.style.cssText = 'white-space:pre-wrap;word-break:break-all;';
-            panel.appendChild(content);
-            document.body.appendChild(panel);
-        }
-        // 清空並顯示面板
-        const content = document.getElementById('web-flasher-compile-panel-content');
-        content.innerHTML = '';
-        panel.style.transform = 'translateY(0)';
-
-        // 訊息輸出：同時送到面板 + WebSocket（如果有）
+        // GUI 訊息輸出：透過 activeFakeWs 送 uploadStdout，讓使用者在 GUI 中看到訊息
         const ws = activeFakeWs;
-        const logger = (msg, color) => {
+        const logger = (msg) => {
             console.log('[WebFlasher]', msg);
-            // 面板輸出
-            const line = document.createElement('div');
-            line.style.color = color || '#b5cea8';
-            line.style.margin = '1px 0';
-            line.textContent = '[WebFlasher] ' + msg;
-            content.appendChild(line);
-            panel.scrollTop = panel.scrollHeight;
-            // 也送到 GUI WebSocket（如果已連線）
             if (ws) {
-                const ansiColor = color === '#f44747' ? '\x1b[31m' : '\x1b[36m';
                 injectMessage(ws, {
                     jsonrpc: "2.0",
                     method: "uploadStdout",
-                    params: { message: `${ansiColor}[WebFlasher] ${msg}\n\x1b[0m` }
+                    params: { message: `\x1b[36m[WebFlasher] ${msg}\n\x1b[0m` }
                 });
             }
         };
@@ -492,7 +448,7 @@
             buttonElement.style.opacity = '0.7';
             buttonElement.style.pointerEvents = 'none';
 
-            // 若有 ws，先送一個空 result 讓 GUI 內建 console 面板也出現
+            // 若有 ws，先送一個空 result 讓 GUI 顯示 console 面板
             if (ws) {
                 injectMessage(ws, {
                     jsonrpc: "2.0",
@@ -518,8 +474,6 @@
                 logger('程式碼未變更，使用快取的編譯結果 ✅');
                 if (textSpan) textSpan.textContent = '✅ 已編譯';
                 setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 2000);
-                // 3 秒後關閉面板
-                setTimeout(() => { panel.style.transform = 'translateY(100%)'; }, 3000);
                 return;
             }
 
@@ -558,12 +512,20 @@
             if (!response.ok || !result.success) {
                 const errMsg = result.error || '編譯失敗';
                 // 顯示編譯錯誤的詳細內容
-                logger('❌ 編譯失敗！', '#f44747');
-                // 多行錯誤訊息逐行送出到面板
-                const lines = errMsg.split('\n');
-                for (const line of lines) {
-                    if (line.trim()) {
-                        logger(line, '#f44747');
+                logger('❌ 編譯失敗！');
+                if (errMsg.length > 200) {
+                    // 多行錯誤訊息逐行送出
+                    const lines = errMsg.split('\n');
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            if (ws) {
+                                injectMessage(ws, {
+                                    jsonrpc: "2.0",
+                                    method: "uploadStdout",
+                                    params: { message: `\x1b[31m${line}\n\x1b[0m` }
+                                });
+                            }
+                        }
                     }
                 }
                 throw new Error(errMsg.slice(0, 500));
@@ -589,15 +551,22 @@
 
             if (textSpan) textSpan.textContent = '✅ 編譯成功';
             setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 3000);
-            // 8 秒後自動關閉面板
-            setTimeout(() => { panel.style.transform = 'translateY(100%)'; }, 8000);
 
         } catch (err) {
             console.error('[Intersector] 編譯失敗:', err);
             if (textSpan) textSpan.textContent = '❌ 編譯失敗';
 
-            // 送錯誤訊息到面板（面板保持開啟讓使用者檢視）
-            logger(`❌ 編譯失敗：${err.message}`, '#f44747');
+            // 送錯誤訊息到 GUI
+            if (ws) {
+                injectMessage(ws, {
+                    jsonrpc: "2.0",
+                    method: "uploadStdout",
+                    params: { message: `\x1b[31m[WebFlasher] ❌ 編譯失敗：${err.message}\n\x1b[0m` }
+                });
+            } else {
+                // 沒有 ws 時才用 alert
+                alert(`編譯失敗：${err.message}`);
+            }
 
             setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 3000);
         } finally {
