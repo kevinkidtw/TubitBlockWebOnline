@@ -426,14 +426,37 @@
         }
         isCompiling = true;
 
-        const originalText = buttonElement.querySelector('span')?.textContent || '編譯 (線上)';
+        const originalText = buttonElement.querySelector('span')?.textContent || '編譯 (' + getCompileModeLabel() + ')';
         const textSpan = buttonElement.querySelector('span');
+
+        // GUI 訊息輸出：透過 activeFakeWs 送 uploadStdout，讓使用者在 GUI 中看到訊息
+        const ws = activeFakeWs;
+        const logger = (msg) => {
+            console.log('[WebFlasher]', msg);
+            if (ws) {
+                injectMessage(ws, {
+                    jsonrpc: "2.0",
+                    method: "uploadStdout",
+                    params: { message: `\x1b[36m[WebFlasher] ${msg}\n\x1b[0m` }
+                });
+            }
+        };
 
         try {
             // 更新按鈕狀態
             if (textSpan) textSpan.textContent = '⏳ 編譯中...';
             buttonElement.style.opacity = '0.7';
             buttonElement.style.pointerEvents = 'none';
+
+            // 若有 ws，先送一個空 result 讓 GUI 顯示 console 面板
+            if (ws) {
+                injectMessage(ws, {
+                    jsonrpc: "2.0",
+                    id: 'compile-only-' + Date.now(),
+                    result: null
+                });
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
 
             // 取得當前程式碼
             const currentCode = getCurrentCodeFromGUI();
@@ -448,42 +471,103 @@
             
             // 如果程式碼沒有變更且已有快取，直接跳過
             if (cachedArtifacts && cachedCodeHash === codeHash) {
-                console.log('[Intersector] 程式碼未變更，使用快取的編譯結果');
+                logger('程式碼未變更，使用快取的編譯結果 ✅');
                 if (textSpan) textSpan.textContent = '✅ 已編譯';
                 setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 2000);
                 return;
             }
 
-            console.log(`[Intersector] 發送編譯請求到 ${COMPILE_SERVER_URL}`);
-            
-            const response = await fetch(COMPILE_SERVER_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    code: currentCode,
-                    board: 'esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default'
-                })
-            });
+            const modeLabel = compileMode === 'local' ? '本地' : '線上';
+            logger(`正在發起${modeLabel}編譯 (${COMPILE_SERVER_URL})...`);
+            logger(`⏳ 等待${modeLabel}編譯中，請稍候...（依程式複雜度，約需 30 秒至 2 分鐘）`);
+
+            // 每 15 秒送一次提示
+            let waitSecs = 15;
+            const compileHeartbeat = setInterval(() => {
+                logger(`⏳ 仍在編譯中，已等待約 ${waitSecs} 秒，請繼續等候...`);
+                waitSecs += 15;
+            }, 15000);
+
+            let response;
+            try {
+                response = await fetch(COMPILE_SERVER_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: currentCode,
+                        board: 'esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default'
+                    })
+                });
+            } catch (fetchErr) {
+                if (compileMode === 'local') {
+                    throw new Error('無法連接本地編譯伺服器 (localhost:3000)。請確認已啟動本地編譯器。');
+                }
+                throw fetchErr;
+            } finally {
+                clearInterval(compileHeartbeat);
+            }
 
             const result = await response.json();
 
             if (!response.ok || !result.success) {
-                throw new Error(result.error || '編譯失敗');
+                const errMsg = result.error || '編譯失敗';
+                // 顯示編譯錯誤的詳細內容
+                logger('❌ 編譯失敗！');
+                if (errMsg.length > 200) {
+                    // 多行錯誤訊息逐行送出
+                    const lines = errMsg.split('\n');
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            if (ws) {
+                                injectMessage(ws, {
+                                    jsonrpc: "2.0",
+                                    method: "uploadStdout",
+                                    params: { message: `\x1b[31m${line}\n\x1b[0m` }
+                                });
+                            }
+                        }
+                    }
+                }
+                throw new Error(errMsg.slice(0, 500));
             }
 
-            // 儲存快取（artifacts 與 flashAddresses 必須一起快取，保持一致性）
+            // 儲存快取
             cachedArtifacts = result.artifacts;
             cachedFlashAddresses = result.flashAddresses || null;
             cachedCodeHash = codeHash;
 
-            console.log(`[Intersector] 編譯成功！取得 ${result.artifactCount || Object.keys(result.artifacts).length} 個檔案`);
+            const fileCount = result.artifactCount || Object.keys(result.artifacts).length;
+            logger(`✅ 編譯成功！取得 ${fileCount} 個檔案`);
+
+            // 顯示編譯產物詳情
+            if (result.stdout) {
+                const stdoutLines = result.stdout.split('\n').slice(-5); // 只顯示最後幾行
+                for (const line of stdoutLines) {
+                    if (line.trim()) logger(`  ${line.trim()}`);
+                }
+            }
+
+            logger('可以按「上傳」按鈕燒錄到開發板。');
+
             if (textSpan) textSpan.textContent = '✅ 編譯成功';
             setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 3000);
 
         } catch (err) {
             console.error('[Intersector] 編譯失敗:', err);
             if (textSpan) textSpan.textContent = '❌ 編譯失敗';
-            alert(`編譯失敗：${err.message}`);
+
+            // 送錯誤訊息到 GUI
+            if (ws) {
+                injectMessage(ws, {
+                    jsonrpc: "2.0",
+                    method: "uploadStdout",
+                    params: { message: `\x1b[31m[WebFlasher] ❌ 編譯失敗：${err.message}\n\x1b[0m` }
+                });
+            } else {
+                // 沒有 ws 時才用 alert
+                alert(`編譯失敗：${err.message}`);
+            }
+
             setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 3000);
         } finally {
             isCompiling = false;
