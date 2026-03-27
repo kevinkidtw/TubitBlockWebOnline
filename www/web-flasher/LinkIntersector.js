@@ -191,6 +191,21 @@
 
             // 連線成功後，設定 serial data callback 以便之後 read 時轉發資料
             activeFakeWs = ws;
+
+            // 監聽 USB 斷線，主動通知 GUI
+            window.serialManager.onDisconnected = function () {
+                isSerialReading = false;
+                console.warn('[Intersector] USB 裝置已拔除，通知 GUI 斷線');
+                if (activeFakeWs) {
+                    injectMessage(activeFakeWs, {
+                        jsonrpc: "2.0",
+                        method: "peripheralUnplug",
+                        params: {}
+                    });
+                    activeFakeWs = null;
+                }
+            };
+
             window.serialManager.onDataReceived = function (value) {
                 if (!isSerialReading || isUploading) return;
                 // 將 Uint8Array 轉為 base64（符合 OpenBlock Link 原始協議）
@@ -418,7 +433,7 @@
             // Web Serial 的 requestPort 必須在「使用者手勢」(User Gesture) 的 call stack 裡面執行。
             // 由於之前的 fetch 是非同步的，等 fetch 回來後就失去了手勢上下文。
             // 解決方案：在開始編譯 (fetch) 之前，就先檢查並請求 Port 權限。
-            if (!window.serialManager.isOpen) {
+            if (!window.serialManager.isOpen || !window.serialManager.port) {
                 logger("偵測到序列埠尚未連線，正在請求存取權限...");
                 await window.serialManager.requestPort();
                 // 先用 115200 開啟（之後閃爍時會自動調整，或者是這裡直接用 460800 也可以）
@@ -534,7 +549,7 @@
 
     async function flashESP32(artifacts, flashAddresses, logger) {
         if (!window.serialManager) throw new Error("SerialManager not initialized");
-        if (!window.serialManager.isOpen) {
+        if (!window.serialManager.isOpen || !window.serialManager.port) {
             logger("序列埠尚未開啟，正在請求權限並連線...");
             await window.serialManager.requestPort();
             await window.serialManager.open(460800);

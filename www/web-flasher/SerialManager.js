@@ -20,8 +20,21 @@ window.SerialManager = class {
         // 外部監聽器 (例如一般通訊模式下，把資料拋給 UI 或 Firmata)
         this.onDataReceived = null;
 
+        // USB 裝置拔除時的外部通知 callback
+        this.onDisconnected = null;
+
         // 標記是否為「燒錄攔截模式」。如果是 true，背景迴圈就把資料丟進 _stk500_rxBuffer
         this.isFlashingMode = false;
+
+        // 監聯 USB 裝置拔除事件
+        if (navigator.serial) {
+            navigator.serial.addEventListener('disconnect', (e) => {
+                if (this.port && e.target === this.port) {
+                    console.warn('[SerialManager] ⚠️ USB 裝置已拔除，自動清理連線狀態');
+                    this._handleDisconnect();
+                }
+            });
+        }
     }
 
     /**
@@ -133,6 +146,34 @@ window.SerialManager = class {
         if (!this.writer) throw new Error("Writer 尚未就緒");
         const data = new Uint8Array(bytes);
         await this.writer.write(data);
+    }
+
+    /**
+     * USB 裝置物理拔除時的清理處理
+     * Port 已斷開，不需要（也無法）正常 close，直接清理狀態即可。
+     */
+    _handleDisconnect() {
+        this.isOpen = false;
+        this.isFlashingMode = false;
+
+        // reader/writer 直接丟棄（port 已物理斷開，cancel/close 會失敗）
+        if (this.reader) {
+            try { this.reader.releaseLock(); } catch (e) { /* 已斷開，忽略 */ }
+            this.reader = null;
+        }
+        if (this.writer) {
+            try { this.writer.releaseLock(); } catch (e) { /* 已斷開，忽略 */ }
+            this.writer = null;
+        }
+
+        this.port = null;
+
+        // 通知外部（如 LinkIntersector）
+        if (this.onDisconnected) {
+            try { this.onDisconnected(); } catch (e) {
+                console.warn('[SerialManager] onDisconnected callback 執行失敗:', e);
+            }
+        }
     }
 
     /**
