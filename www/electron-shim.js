@@ -1578,30 +1578,38 @@
         // 在齒輪下拉選單中注入「部署本地編譯器」按鈕
         function injectDeployMenuItem(root) {
             if (!root.querySelectorAll) return;
-            // 偵測齒輪選單 (class 含 "menu_menu-section")
-            var menuSections = root.querySelectorAll('div[class*="menu_menu-section"]');
-            if (menuSections.length === 0 && root.className && root.className.indexOf && root.className.indexOf('menu_menu-section') >= 0) {
-                menuSections = [root];
-            }
-            for (var s = 0; s < menuSections.length; s++) {
-                var section = menuSections[s];
-                if (section.querySelector('#web-deploy-local-compiler-btn')) continue;
-                // 確認是齒輪選單（裡面有「語言」或「數據」等字眼）
-                var sectionText = section.textContent || '';
-                if (sectionText.indexOf('語言') < 0 && sectionText.indexOf('Language') < 0 &&
-                    sectionText.indexOf('設置') < 0 && sectionText.indexOf('設定') < 0 &&
-                    sectionText.indexOf('隱私') < 0 && sectionText.indexOf('Privacy') < 0) continue;
 
-                // 找到最後一個 menu-item 來複製樣式
-                var menuItems = section.querySelectorAll('li[class*="menu_menu-item"]');
+            // 齒輪選單是一個 ul[class*="menu_menu"]，裡面有 li[class*="menu_menu-item"]
+            // 選單出現時含有「檢查更新」「清除緩存並重啟」「安裝驅動」等項目
+            var menuLists = root.querySelectorAll('ul[class*="menu_menu"]');
+            // 如果 root 本身就是 ul
+            if (menuLists.length === 0 && root.tagName === 'UL' && root.className && root.className.indexOf('menu_menu') >= 0) {
+                menuLists = [root];
+            }
+            // 也處理 root 是 li 被加進 ul 的情況
+            if (menuLists.length === 0 && root.tagName === 'LI' && root.parentElement &&
+                root.parentElement.tagName === 'UL' && root.parentElement.className &&
+                root.parentElement.className.indexOf('menu_menu') >= 0) {
+                menuLists = [root.parentElement];
+            }
+
+            for (var u = 0; u < menuLists.length; u++) {
+                var ul = menuLists[u];
+                if (ul.querySelector('#web-deploy-local-compiler-btn')) continue;
+
+                // 確認這是齒輪選單：包含「檢查更新」或「安裝驅動」或「清除緩存」
+                var ulText = ul.textContent || '';
+                if (ulText.indexOf('檢查更新') < 0 && ulText.indexOf('安裝驅動') < 0 &&
+                    ulText.indexOf('清除緩存') < 0 && ulText.indexOf('Install') < 0 &&
+                    ulText.indexOf('Check update') < 0) continue;
+
+                // 找最後一個 menu-item 作為樣式模板
+                var menuItems = ul.querySelectorAll('li[class*="menu_menu-item"]');
                 if (menuItems.length === 0) continue;
 
                 var templateItem = menuItems[menuItems.length - 1];
-                var newItem = templateItem.cloneNode(true);
-                newItem.id = 'web-deploy-local-compiler-btn';
-                // 清除 React 事件以避免衝突
-                var clone = newItem.cloneNode(true);
-                newItem.parentNode || (clone = newItem); // 如果 parentNode 為空就用原本的
+                var clone = templateItem.cloneNode(true);
+                clone.id = 'web-deploy-local-compiler-btn';
 
                 // 設定文字
                 var spans = clone.querySelectorAll('span');
@@ -1614,19 +1622,30 @@
                 var imgs = clone.querySelectorAll('img');
                 for (var im = 0; im < imgs.length; im++) { imgs[im].style.display = 'none'; }
 
+                // 移除 React 內部屬性以避免事件衝突
+                var allEls = clone.querySelectorAll('*');
+                for (var ae = 0; ae < allEls.length; ae++) {
+                    var attrs = allEls[ae].attributes;
+                    for (var ai = attrs.length - 1; ai >= 0; ai--) {
+                        if (attrs[ai].name.indexOf('data-reactid') >= 0) {
+                            allEls[ae].removeAttribute(attrs[ai].name);
+                        }
+                    }
+                }
+
                 clone.style.cursor = 'pointer';
-                clone.addEventListener('click', function (e) {
+                clone.style.borderTop = '1px solid rgba(255,255,255,0.15)';
+                clone.style.marginTop = '4px';
+                clone.style.paddingTop = '8px';
+
+                // 重新綁定 click（覆蓋 cloneNode 帶來的舊事件）
+                clone.onclick = function (e) {
                     e.preventDefault();
                     e.stopPropagation();
                     downloadLocalCompilerScript();
-                });
+                };
 
-                // 加分隔線再插入
-                var hr = document.createElement('hr');
-                hr.style.cssText = 'border:none;border-top:1px solid rgba(255,255,255,0.15);margin:4px 0;';
-                section.appendChild(hr);
-                section.appendChild(clone);
-
+                ul.appendChild(clone);
                 console.log('[Web] 已注入「部署本地編譯器」選單項目');
             }
         }
