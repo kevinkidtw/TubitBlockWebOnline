@@ -1659,10 +1659,25 @@
                     }
                 }
 
+                // 優化原生選單的分隔線 (移除「檢查更新」上方的多餘頂部線條)
+                var sectionClass = '';
+                for (var mi = 0; mi < menuItems.length; mi++) {
+                    var item = menuItems[mi];
+                    var text = item.textContent || '';
+                    // 尋找原生使用的 section 類別名稱 (如 menu_menu-section_1zNdI)
+                    var match = item.className.match(/(menu_menu-section_[a-zA-Z0-9_-]+)/);
+                    if (match) sectionClass = match[1];
+
+                    if (text.indexOf('檢查更新') >= 0) {
+                        item.className = item.className.replace(/(menu_menu-section_[a-zA-Z0-9_-]+)/g, '').trim();
+                    }
+                }
+
                 clone.style.cursor = 'pointer';
-                clone.style.borderTop = '1px solid rgba(255,255,255,0.15)';
-                clone.style.marginTop = '4px';
-                clone.style.paddingTop = '8px';
+                // 確保我們注入的按鈕帶有原生的分隔線類別
+                if (sectionClass && clone.className.indexOf(sectionClass) < 0) {
+                    clone.className += ' ' + sectionClass;
+                }
 
                 // 重新綁定 click（覆蓋 cloneNode 帶來的舊事件）
                 clone.onclick = function (e) {
