@@ -1571,8 +1571,23 @@
                 processHide(candidates[i]);
             }
 
-            // 注入「部署本地編譯器」選單項目
-            injectDeployMenuItem(root);
+            // 注入「部署本地編譯器」選單項目（延遲執行，等 React 完成渲染）
+            scheduleDeployMenuInjection(root);
+        }
+
+        // 延遲注入機制：等待 React 完成 menu 渲染後再檢查
+        var _deployInjectionTimer = null;
+        function scheduleDeployMenuInjection(root) {
+            // 使用延遲確保 React 已完成渲染 menu 內容
+            if (_deployInjectionTimer) clearTimeout(_deployInjectionTimer);
+            _deployInjectionTimer = setTimeout(function () {
+                _deployInjectionTimer = null;
+                // 搜尋所有目前存在的 menu ul
+                var allMenus = document.querySelectorAll('ul[class*="menu_menu"]');
+                for (var i = 0; i < allMenus.length; i++) {
+                    injectDeployMenuItem(allMenus[i]);
+                }
+            }, 150);
         }
 
         // 在齒輪下拉選單中注入「部署本地編譯器」按鈕
