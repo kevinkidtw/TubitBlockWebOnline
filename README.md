@@ -463,9 +463,15 @@ TubitBlockWeb線上編譯版/
 
 ## 十、版本更新紀錄
 
-### v1.2（目前版本）— 2026-03-15
+### v1.2（目前版本）— 2026-03-27
 
 **新增功能：**
+
+- **串口監視器 Web Serial 支援**：新增透過 Web Serial API 的串口監視器功能，可在瀏覽器中即時查看 ESP32 的串口輸出資料，並修復 `driveVectorOpen` 空值 bug。
+
+- **USB 拔插自動偵測**：監聽 `navigator.serial` 的 `disconnect` 事件，當 USB 裝置被拔除時自動清理連線狀態（`isOpen`、`port`、`reader`、`writer`），並主動通知 GUI 已斷線。下次上傳時會直接彈出裝置選擇視窗，不再需要等到燒錄失敗後才發現。
+  - `SerialManager.js`：新增 `_handleDisconnect()` 方法與 `onDisconnected` callback。
+  - `LinkIntersector.js`：上傳前加入 port 有效性雙重檢查（`!isOpen || !port`）。
 
 - **專案檔儲存與載入（.tb 格式）**：在瀏覽器環境中完整實作 `.tb` 專案檔的儲存與載入功能。
   - 儲存：攔截 GUI 的 `<a download>` 動作，將副檔名統一為 `.tb`。
@@ -473,6 +479,7 @@ TubitBlockWeb線上編譯版/
   - 相容 `.sb3`、`.ob`、`.tb` 三種副檔名（ZIP 格式均可正確解壓）。
 
 - **修復編譯進度訊息未即時顯示**：雲端編譯開始時，「⏳ 等待雲端編譯中…」提示訊息未立即出現於 GUI 訊息視窗。根本原因：`result: null` 與 `uploadStdout` 訊息在同一個同步 event loop tick 內連續送出，React 尚未完成面板的 re-render，導致訊息遺失。修復方式：在送出 `result: null` 後插入 200ms 延遲，確保 GUI 面板渲染完成再送出進度訊息。
+
 
 ---
 
