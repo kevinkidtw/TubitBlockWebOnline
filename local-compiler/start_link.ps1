@@ -62,24 +62,38 @@ if (-not $npmPath) {
 }
 Write-Host "  [OK] Node.js 已就緒" -ForegroundColor Green
 
-# ---- 第二步：下載 compiler-server ----
+# ---- 第二步：下載 compiler-server（含自訂函式庫）----
 Write-Host "[2/4] 正在準備編譯伺服器..." -ForegroundColor Yellow
 
 $compilerDir = Join-Path $scriptDir "compiler-server"
+$customLibDir = Join-Path $compilerDir "custom_libraries"
 
-if (-not (Test-Path (Join-Path $compilerDir "server.js"))) {
-    Write-Host "  正在從 GitHub 下載 compiler-server..." -ForegroundColor Cyan
+if (-not (Test-Path (Join-Path $compilerDir "server.js")) -or -not (Test-Path $customLibDir)) {
+    Write-Host "  正在從 GitHub 下載 compiler-server（含自訂函式庫）..." -ForegroundColor Cyan
+    
+    $gitPath = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $gitPath) {
+        Write-Host "  [錯誤] 需要 Git 來下載完整的 compiler-server（含 74 個函式庫）" -ForegroundColor Red
+        Write-Host "  請先安裝 Git: https://git-scm.com/" -ForegroundColor Red
+        pause
+        exit 1
+    }
+
+    $tempRepo = Join-Path $env:TEMP "tubitblock-repo-$(Get-Random)"
+    git clone --filter=blob:none --no-checkout --depth 1 `
+        "https://github.com/kevinkidtw/TubitBlockWebOnline.git" $tempRepo 2>&1
+    Push-Location $tempRepo
+    git sparse-checkout init --cone
+    git sparse-checkout set compiler-server
+    git checkout 2>&1
+    Pop-Location
+
     New-Item -ItemType Directory -Path $compilerDir -Force | Out-Null
-    
-    Receive-FileSimple `
-        -Url "https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/compiler-server/server.js" `
-        -OutFile (Join-Path $compilerDir "server.js") `
-        -DisplayName "server.js"
-    
-    Receive-FileSimple `
-        -Url "https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/compiler-server/package.json" `
-        -OutFile (Join-Path $compilerDir "package.json") `
-        -DisplayName "package.json"
+    Copy-Item -Path (Join-Path $tempRepo "compiler-server\*") -Destination $compilerDir -Recurse -Force
+    Remove-Item $tempRepo -Recurse -Force -ErrorAction SilentlyContinue
+
+    $libCount = (Get-ChildItem -Path $customLibDir -Directory -ErrorAction SilentlyContinue).Count
+    Write-Host "  [OK] 已下載 $libCount 個自訂函式庫" -ForegroundColor Green
 }
 Write-Host "  [OK] compiler-server 已就緒" -ForegroundColor Green
 

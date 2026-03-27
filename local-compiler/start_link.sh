@@ -64,28 +64,32 @@ echo "[2/4] 正在準備編譯伺服器..."
 
 COMPILER_DIR="$SCRIPT_DIR/compiler-server"
 
-if [ ! -f "$COMPILER_DIR/server.js" ]; then
-    echo "  正在從 GitHub 下載 compiler-server..."
-    mkdir -p "$COMPILER_DIR"
-
-    # 嘗試用 Git sparse-checkout
-    if command -v git &> /dev/null; then
-        TEMP_REPO="/tmp/tubitblock-repo-$$"
-        git clone --filter=blob:none --no-checkout --depth 1 \
-            https://github.com/kevinkidtw/TubitBlockWebOnline.git "$TEMP_REPO" 2>&1
-        cd "$TEMP_REPO"
-        git sparse-checkout init --cone
-        git sparse-checkout set compiler-server
-        git checkout 2>&1
-        cp -r "$TEMP_REPO/compiler-server/"* "$COMPILER_DIR/"
-        rm -rf "$TEMP_REPO"
-    else
-        # 用 curl 下載 server.js 和 package.json
-        curl -sL "https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/compiler-server/server.js" \
-            -o "$COMPILER_DIR/server.js"
-        curl -sL "https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/compiler-server/package.json" \
-            -o "$COMPILER_DIR/package.json"
+# 檢查 server.js 和 custom_libraries 是否都存在
+if [ ! -f "$COMPILER_DIR/server.js" ] || [ ! -d "$COMPILER_DIR/custom_libraries" ]; then
+    echo "  正在從 GitHub 下載 compiler-server（含自訂函式庫）..."
+    
+    if ! command -v git &> /dev/null; then
+        echo "  [錯誤] 需要 Git 來下載完整的 compiler-server（含 74 個函式庫）"
+        echo "  請先安裝 Git: https://git-scm.com/"
+        exit 1
     fi
+
+    TEMP_REPO="/tmp/tubitblock-repo-$$"
+    rm -rf "$TEMP_REPO"
+    git clone --filter=blob:none --no-checkout --depth 1 \
+        https://github.com/kevinkidtw/TubitBlockWebOnline.git "$TEMP_REPO" 2>&1
+    cd "$TEMP_REPO"
+    git sparse-checkout init --cone
+    git sparse-checkout set compiler-server
+    git checkout 2>&1
+    
+    # 複製整個 compiler-server 目錄（包含 custom_libraries）
+    mkdir -p "$COMPILER_DIR"
+    cp -r "$TEMP_REPO/compiler-server/"* "$COMPILER_DIR/"
+    rm -rf "$TEMP_REPO"
+    
+    LIB_COUNT=$(ls -d "$COMPILER_DIR/custom_libraries"/*/ 2>/dev/null | wc -l | tr -d ' ')
+    echo "  [✓] 已下載 $LIB_COUNT 個自訂函式庫"
 fi
 
 echo "  [✓] compiler-server 已就緒: $COMPILER_DIR"

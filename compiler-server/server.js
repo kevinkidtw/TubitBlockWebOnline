@@ -164,7 +164,15 @@ app.post('/compile', async (req, res) => {
         fs.writeFileSync(sketchFile, sourceCode, 'utf8');
 
         // 使用 shell exec (而非 execFile) 以正確捕捉 stderr+stdout
-        const librariesFlag = libraries ? `--libraries "${libraries}"` : '';
+        // 自動偵測 custom_libraries 資料夾（與 server.js 同目錄）
+        const customLibDir = path.join(__dirname, 'custom_libraries');
+        let librariesFlag = '';
+        if (libraries) {
+            librariesFlag = `--libraries "${libraries}"`;
+        } else if (fs.existsSync(customLibDir)) {
+            librariesFlag = `--libraries "${customLibDir}"`;
+            console.log(`[Compile] 自動載入自訂函式庫: ${customLibDir}`);
+        }
         // 加雙引號包住 fqbn 防止有空白被切斷
         const cmd = `${ARDUINO_CLI} compile --fqbn "${boardFqbn}" ${librariesFlag} --build-path "${buildDir}" "${sketchDir}" 2>&1`;
 
