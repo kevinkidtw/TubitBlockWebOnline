@@ -1618,13 +1618,23 @@
                     ulText.indexOf('清除緩存') < 0 && ulText.indexOf('Install') < 0 &&
                     ulText.indexOf('Check update') < 0) continue;
 
-                // 找最後一個 menu-item 作為樣式模板
+                // 找第一個可見的 menu-item 作為樣式模板（避免複製到被隱藏的項目）
                 var menuItems = ul.querySelectorAll('li[class*="menu_menu-item"]');
                 if (menuItems.length === 0) continue;
 
-                var templateItem = menuItems[menuItems.length - 1];
+                var templateItem = null;
+                for (var mi = 0; mi < menuItems.length; mi++) {
+                    if (menuItems[mi].style.display !== 'none') {
+                        templateItem = menuItems[mi];
+                        break;
+                    }
+                }
+                if (!templateItem) templateItem = menuItems[0];
+
                 var clone = templateItem.cloneNode(true);
                 clone.id = 'web-deploy-local-compiler-btn';
+                // 強制顯示（避免繼承 display:none）
+                clone.style.display = '';
 
                 // 設定文字
                 var spans = clone.querySelectorAll('span');
