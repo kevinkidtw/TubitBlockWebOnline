@@ -1570,6 +1570,110 @@
             for (var i = 0; i < candidates.length; i++) {
                 processHide(candidates[i]);
             }
+
+            // 注入「部署本地編譯器」選單項目
+            injectDeployMenuItem(root);
+        }
+
+        // 在齒輪下拉選單中注入「部署本地編譯器」按鈕
+        function injectDeployMenuItem(root) {
+            if (!root.querySelectorAll) return;
+            // 偵測齒輪選單 (class 含 "menu_menu-section")
+            var menuSections = root.querySelectorAll('div[class*="menu_menu-section"]');
+            if (menuSections.length === 0 && root.className && root.className.indexOf && root.className.indexOf('menu_menu-section') >= 0) {
+                menuSections = [root];
+            }
+            for (var s = 0; s < menuSections.length; s++) {
+                var section = menuSections[s];
+                if (section.querySelector('#web-deploy-local-compiler-btn')) continue;
+                // 確認是齒輪選單（裡面有「語言」或「數據」等字眼）
+                var sectionText = section.textContent || '';
+                if (sectionText.indexOf('語言') < 0 && sectionText.indexOf('Language') < 0 &&
+                    sectionText.indexOf('設置') < 0 && sectionText.indexOf('設定') < 0 &&
+                    sectionText.indexOf('隱私') < 0 && sectionText.indexOf('Privacy') < 0) continue;
+
+                // 找到最後一個 menu-item 來複製樣式
+                var menuItems = section.querySelectorAll('li[class*="menu_menu-item"]');
+                if (menuItems.length === 0) continue;
+
+                var templateItem = menuItems[menuItems.length - 1];
+                var newItem = templateItem.cloneNode(true);
+                newItem.id = 'web-deploy-local-compiler-btn';
+                // 清除 React 事件以避免衝突
+                var clone = newItem.cloneNode(true);
+                newItem.parentNode || (clone = newItem); // 如果 parentNode 為空就用原本的
+
+                // 設定文字
+                var spans = clone.querySelectorAll('span');
+                if (spans.length > 0) {
+                    spans[spans.length - 1].textContent = '⚙ 部署本地編譯器';
+                } else {
+                    clone.textContent = '⚙ 部署本地編譯器';
+                }
+                // 移除可能的 checkmark/radio 圖示
+                var imgs = clone.querySelectorAll('img');
+                for (var im = 0; im < imgs.length; im++) { imgs[im].style.display = 'none'; }
+
+                clone.style.cursor = 'pointer';
+                clone.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    downloadLocalCompilerScript();
+                });
+
+                // 加分隔線再插入
+                var hr = document.createElement('hr');
+                hr.style.cssText = 'border:none;border-top:1px solid rgba(255,255,255,0.15);margin:4px 0;';
+                section.appendChild(hr);
+                section.appendChild(clone);
+
+                console.log('[Web] 已注入「部署本地編譯器」選單項目');
+            }
+        }
+
+        function downloadLocalCompilerScript() {
+            var platform = navigator.platform || '';
+            var ua = navigator.userAgent || '';
+            var isWindows = platform.indexOf('Win') >= 0 || ua.indexOf('Windows') >= 0;
+            var isMac = platform.indexOf('Mac') >= 0;
+
+            var fileName, downloadUrl;
+            if (isWindows) {
+                fileName = 'start_compiler.bat';
+                downloadUrl = 'https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/local-compiler/start_link.bat';
+            } else {
+                fileName = 'start_compiler.sh';
+                downloadUrl = 'https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/local-compiler/start_link.sh';
+            }
+
+            // 使用 <a download> 觸發下載
+            fetch(downloadUrl)
+                .then(function (resp) {
+                    if (!resp.ok) throw new Error('下載失敗: HTTP ' + resp.status);
+                    return resp.blob();
+                })
+                .then(function (blob) {
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(a.href);
+
+                    setTimeout(function () {
+                        var osHint = isWindows
+                            ? '請雙擊下載的 start_compiler.bat 執行安裝。'
+                            : (isMac
+                                ? '請在終端機中執行：\nchmod +x ~/Downloads/' + fileName + ' && ~/Downloads/' + fileName
+                                : '請在終端機中執行：\nchmod +x ' + fileName + ' && ./' + fileName);
+                        alert('✅ 腳本已下載！\n\n' + osHint + '\n\n安裝完成後，在工具列切換到「💻 本地」即可使用本地編譯。');
+                    }, 500);
+                })
+                .catch(function (err) {
+                    console.error('[Web] 下載本地編譯器腳本失敗:', err);
+                    alert('下載失敗：' + err.message + '\n\n請手動從 GitHub 下載：\nhttps://github.com/kevinkidtw/TubitBlockWebOnline/tree/main/local-compiler');
+                });
         }
 
         // Patch the document title

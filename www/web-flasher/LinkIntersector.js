@@ -11,9 +11,13 @@
     const OriginalWebSocket = window.WebSocket;
 
     // --- 編譯伺服器設定 ---
-    // 優先使用遠端公網伺服器 (NAS Public IP)
-    const COMPILE_SERVER_URL = window.TUBITBLOCK_COMPILE_SERVER
+    const ONLINE_COMPILE_URL = window.TUBITBLOCK_COMPILE_SERVER
         || 'https://kevinkid-tubit.mooo.com:3001/compile';
+    const LOCAL_COMPILE_URL = 'http://localhost:3000/compile';
+
+    // 從 localStorage 讀取使用者上次的選擇（預設線上）
+    let compileMode = localStorage.getItem('tubitblock_compile_mode') || 'online';
+    let COMPILE_SERVER_URL = (compileMode === 'local') ? LOCAL_COMPILE_URL : ONLINE_COMPILE_URL;
 
     // --- 編譯快取 (Phase 4) ---
     let cachedArtifacts = null;       // Base64 artifacts from last successful compile
@@ -24,35 +28,109 @@
     let isSerialReading = false;      // GUI 是否已啟動串口讀取（read 方法觸發）
     let activeFakeWs = null;          // 當前活動的 fake WebSocket 引用（用於 onDataReceived）
     
-    // --- 階段 1：DOM 監聽與「編譯」按鈕注入 ---
+    // --- 階段 1：DOM 監聽與「編譯」按鈕 + 模式切換注入 ---
+    function getCompileModeLabel() {
+        return compileMode === 'local' ? '💻 本地' : '🌐 線上';
+    }
+
     function injectCompileButton() {
         const uploadButton = document.querySelector('div.hardware-header_upload-button_24CyN');
         if (uploadButton && !document.getElementById('web-flasher-compile-btn')) {
-            console.log('[Intersector] Found Upload button, injecting Compile button...');
+            console.log('[Intersector] Found Upload button, injecting Compile + Toggle buttons...');
             
-            // 複製上傳按鈕的 DOM 結構以維持一致的樣式
+            // === 編譯按鈕 ===
             const compileButton = uploadButton.cloneNode(true);
             compileButton.id = 'web-flasher-compile-btn';
-            
-            // 修改文字與圖示 (如果有的話)
             const textSpan = compileButton.querySelector('span');
             if (textSpan) {
-                textSpan.textContent = '編譯 (線上)';
+                textSpan.textContent = '編譯 (' + getCompileModeLabel() + ')';
             }
-            
-            // 更改顏色以區分 (可選，這裡稍微調暗一點藍色)
             compileButton.style.backgroundColor = '#155bb5';
-            compileButton.style.marginRight = '10px';
-            
-            // 點擊事件：Phase 3 - 連接到線上編譯伺服器
+            compileButton.style.marginRight = '6px';
             compileButton.addEventListener('click', (e) => {
                 e.stopPropagation();
                 console.log('[Intersector] Compile button clicked!');
                 handleCompileOnly(compileButton);
             });
-
-            // 插入到上傳按鈕的前面
             uploadButton.parentNode.insertBefore(compileButton, uploadButton);
+
+            // === 模式切換按鈕 ===
+            const toggleBtn = document.createElement('div');
+            toggleBtn.id = 'web-flasher-mode-toggle';
+            toggleBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;' +
+                'padding:4px 10px;margin-right:6px;border-radius:4px;cursor:pointer;' +
+                'font-size:12px;font-weight:bold;color:#fff;user-select:none;' +
+                'transition:background-color 0.2s;min-width:60px;height:32px;';
+            toggleBtn.style.backgroundColor = (compileMode === 'local') ? '#2e7d32' : '#1565c0';
+            toggleBtn.textContent = getCompileModeLabel();
+            toggleBtn.title = '切換本地/線上編譯模式';
+
+            toggleBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (isCompiling || isUploading) {
+                    alert('編譯或燒錄進行中，請稍後再切換。');
+                    return;
+                }
+
+                // 切換模式
+                if (compileMode === 'online') {
+                    // 切到本地：先 ping localhost:3000
+                    toggleBtn.textContent = '⏳ 偵測中...';
+                    toggleBtn.style.backgroundColor = '#757575';
+                    try {
+                        const resp = await fetch('http://localhost:3000/', {
+                            method: 'GET',
+                            signal: AbortSignal.timeout(3000)
+                        });
+                        if (resp.ok) {
+                            compileMode = 'local';
+                            COMPILE_SERVER_URL = LOCAL_COMPILE_URL;
+                            console.log('[Intersector] 切換到本地編譯模式');
+                        } else {
+                            throw new Error('Server responded with ' + resp.status);
+                        }
+                    } catch (err) {
+                        alert('⚠️ 無法連接本地編譯伺服器 (localhost:3000)\n\n' +
+                              '請先執行「部署本地編譯器」下載的啟動腳本。\n' +
+                              '（齒輪選單 → 部署本地編譯器）');
+                        toggleBtn.textContent = getCompileModeLabel();
+                        toggleBtn.style.backgroundColor = '#1565c0';
+                        return;
+                    }
+                } else {
+                    compileMode = 'online';
+                    COMPILE_SERVER_URL = ONLINE_COMPILE_URL;
+                    console.log('[Intersector] 切換到線上編譯模式');
+                }
+
+                // 清空快取
+                cachedArtifacts = null;
+                cachedFlashAddresses = null;
+                cachedCodeHash = null;
+
+                // 持久化
+                localStorage.setItem('tubitblock_compile_mode', compileMode);
+
+                // 更新按鈕外觀
+                toggleBtn.textContent = getCompileModeLabel();
+                toggleBtn.style.backgroundColor = (compileMode === 'local') ? '#2e7d32' : '#1565c0';
+
+                // 同步更新編譯按鈕文字
+                const compileBtnSpan = document.querySelector('#web-flasher-compile-btn span');
+                if (compileBtnSpan) {
+                    compileBtnSpan.textContent = '編譯 (' + getCompileModeLabel() + ')';
+                }
+            });
+
+            // hover 效果
+            toggleBtn.addEventListener('mouseenter', () => {
+                toggleBtn.style.opacity = '0.85';
+            });
+            toggleBtn.addEventListener('mouseleave', () => {
+                toggleBtn.style.opacity = '1';
+            });
+
+            uploadButton.parentNode.insertBefore(toggleBtn, compileButton);
         }
     }
 
