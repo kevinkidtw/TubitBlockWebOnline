@@ -1640,9 +1640,9 @@
                 // 設定文字
                 var spans = clone.querySelectorAll('span');
                 if (spans.length > 0) {
-                    spans[spans.length - 1].textContent = '⚙ 部署本地編譯器';
+                    spans[spans.length - 1].textContent = '部署本地編譯器';
                 } else {
-                    clone.textContent = '⚙ 部署本地編譯器';
+                    clone.textContent = '部署本地編譯器';
                 }
                 // 移除可能的 checkmark/radio 圖示
                 var imgs = clone.querySelectorAll('img');
