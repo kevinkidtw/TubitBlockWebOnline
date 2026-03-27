@@ -1633,8 +1633,9 @@
 
                 var clone = templateItem.cloneNode(true);
                 clone.id = 'web-deploy-local-compiler-btn';
-                // 強制顯示（避免繼承 display:none）
-                clone.style.display = '';
+                // 強制顯示（避免繼承 display:none 或被 hideUnwantedItems 影響）
+                clone.style.display = 'list-item';
+                clone.style.listStyleType = 'none';
 
                 // 設定文字
                 var spans = clone.querySelectorAll('span');
