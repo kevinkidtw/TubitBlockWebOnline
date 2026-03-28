@@ -218,8 +218,8 @@ app.post('/compile', async (req, res) => {
             librariesFlag = `--libraries "${customLibDir}"`;
             console.log(`[Compile] 自動載入自訂函式庫: ${customLibDir}`);
         }
-        // 加雙引號包住 fqbn 防止有空白被切斷
-        const cmd = `${ARDUINO_CLI} compile --fqbn "${boardFqbn}" ${librariesFlag} --build-path "${buildDir}" "${sketchDir}" 2>&1`;
+        // 所有路徑加雙引號，防止路徑含空白（Windows 使用者名稱可能含空白）
+        const cmd = `"${ARDUINO_CLI}" compile --fqbn "${boardFqbn}" ${librariesFlag} --build-path "${buildDir}" "${sketchDir}" 2>&1`;
 
         console.log(`[Compile] Running: ${cmd}`);
 
