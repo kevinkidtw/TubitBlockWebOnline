@@ -15,3 +15,5 @@ tubitblock-link/tools/Arduino/packages/esp32/tools/openocd-esp32/
 tubitblock-link/tools/Arduino/packages/esp32/tools/xtensa-esp-elf-gdb/
 tubitblock-link/tools/Arduino/packages/esp32/tools/riscv32-esp-elf-gdb/
 *.pyc
+local-compiler/arduino-cli
+local-compiler/arduino-cli.exe

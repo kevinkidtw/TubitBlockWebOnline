@@ -6,6 +6,8 @@
 #
 # 使用方式：
 #   chmod +x start_link.sh && ./start_link.sh
+#
+# 所有工具鏈統一安裝至固定目錄 ~/.tubitblock/，與腳本位置無關。
 # =====================================================================
 
 set -e
@@ -14,11 +16,16 @@ OS_NAME="$(uname -s)"
 ARCH="$(uname -m)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# 固定 app 資料目錄（與腳本位置無關）
+APP_DIR="$HOME/.tubitblock"
+mkdir -p "$APP_DIR"
+
 echo "======================================================="
 echo "TubitBlockWeb 本地編譯器安裝與啟動工具"
 echo "======================================================="
 echo "  作業系統: $OS_NAME"
 echo "  CPU 架構: $ARCH"
+echo "  資料目錄: $APP_DIR"
 echo "======================================================="
 
 # ---- 第一步：檢查 Node.js ----
@@ -58,16 +65,29 @@ fi
 
 echo "  [✓] Node.js $(node -v) 已就緒"
 
-# ---- 第二步：下載 compiler-server ----
+# ---- 第二步：定位 compiler-server ----
 echo ""
 echo "[2/4] 正在準備編譯伺服器..."
 
-COMPILER_DIR="$SCRIPT_DIR/compiler-server"
+# 優先順序：
+#   1. 專案根目錄 ../compiler-server/（開發者模式，與 NAS Docker 同步）
+#   2. 固定 app 目錄 ~/.tubitblock/compiler-server/（已下載過）
+#   3. 從 GitHub 下載至固定 app 目錄
+PARENT_COMPILER_DIR="$(dirname "$SCRIPT_DIR")/compiler-server"
+APP_COMPILER_DIR="$APP_DIR/compiler-server"
+COMPILER_DIR=""
 
-# 檢查 server.js 和 custom_libraries 是否都存在
-if [ ! -f "$COMPILER_DIR/server.js" ] || [ ! -d "$COMPILER_DIR/custom_libraries" ]; then
-    echo "  正在從 GitHub 下載 compiler-server（含自訂函式庫）..."
-    
+if [ -f "$PARENT_COMPILER_DIR/server.js" ] && [ -d "$PARENT_COMPILER_DIR/custom_libraries" ]; then
+    COMPILER_DIR="$PARENT_COMPILER_DIR"
+    LIB_COUNT=$(ls -d "$COMPILER_DIR/custom_libraries"/*/ 2>/dev/null | wc -l | tr -d ' ')
+    echo "  [✓] 使用專案內建 compiler-server（$LIB_COUNT 個函式庫）"
+elif [ -f "$APP_COMPILER_DIR/server.js" ] && [ -d "$APP_COMPILER_DIR/custom_libraries" ]; then
+    COMPILER_DIR="$APP_COMPILER_DIR"
+    LIB_COUNT=$(ls -d "$COMPILER_DIR/custom_libraries"/*/ 2>/dev/null | wc -l | tr -d ' ')
+    echo "  [✓] 使用已安裝的 compiler-server（$LIB_COUNT 個函式庫）"
+else
+    echo "  未找到 compiler-server，正在從 GitHub 下載至 $APP_COMPILER_DIR ..."
+
     if ! command -v git &> /dev/null; then
         echo "  [錯誤] 需要 Git 來下載完整的 compiler-server（含 74 個函式庫）"
         echo "  請先安裝 Git: https://git-scm.com/"
@@ -82,12 +102,12 @@ if [ ! -f "$COMPILER_DIR/server.js" ] || [ ! -d "$COMPILER_DIR/custom_libraries"
     git sparse-checkout init --cone
     git sparse-checkout set compiler-server
     git checkout 2>&1
-    
-    # 複製整個 compiler-server 目錄（包含 custom_libraries）
-    mkdir -p "$COMPILER_DIR"
-    cp -r "$TEMP_REPO/compiler-server/"* "$COMPILER_DIR/"
+
+    mkdir -p "$APP_COMPILER_DIR"
+    cp -r "$TEMP_REPO/compiler-server/"* "$APP_COMPILER_DIR/"
     rm -rf "$TEMP_REPO"
-    
+
+    COMPILER_DIR="$APP_COMPILER_DIR"
     LIB_COUNT=$(ls -d "$COMPILER_DIR/custom_libraries"/*/ 2>/dev/null | wc -l | tr -d ' ')
     echo "  [✓] 已下載 $LIB_COUNT 個自訂函式庫"
 fi
@@ -100,18 +120,20 @@ echo "[3/4] 正在檢查 arduino-cli 與 ESP32 核心..."
 
 ARDUINO_CLI=""
 
-# 檢查全域 arduino-cli
+# 優先順序：
+#   1. 系統全域 arduino-cli（PATH 中）
+#   2. 固定 app 目錄 ~/.tubitblock/arduino-cli（已下載過）
+#   3. 下載至固定 app 目錄
 if command -v arduino-cli &> /dev/null; then
     ARDUINO_CLI="$(command -v arduino-cli)"
     echo "  [✓] 已找到全域 arduino-cli: $ARDUINO_CLI"
 else
-    # 本地安裝
-    LOCAL_CLI="$SCRIPT_DIR/arduino-cli"
-    if [ -f "$LOCAL_CLI" ]; then
-        ARDUINO_CLI="$LOCAL_CLI"
-        echo "  [✓] 已找到本地 arduino-cli"
+    APP_CLI="$APP_DIR/arduino-cli"
+    if [ -f "$APP_CLI" ]; then
+        ARDUINO_CLI="$APP_CLI"
+        echo "  [✓] 已找到已安裝的 arduino-cli"
     else
-        echo "  正在下載 arduino-cli v0.35.3..."
+        echo "  正在下載 arduino-cli v0.35.3 至 $APP_DIR ..."
         if [ "$OS_NAME" == "Darwin" ]; then
             if [ "$ARCH" == "arm64" ]; then
                 CLI_URL="https://github.com/arduino/arduino-cli/releases/download/v0.35.3/arduino-cli_0.35.3_macOS_ARM64.tar.gz"
@@ -122,11 +144,11 @@ else
             CLI_URL="https://github.com/arduino/arduino-cli/releases/download/v0.35.3/arduino-cli_0.35.3_Linux_64bit.tar.gz"
         fi
         curl -L --progress-bar -o /tmp/arduino-cli.tar.gz "$CLI_URL"
-        tar xzf /tmp/arduino-cli.tar.gz -C "$SCRIPT_DIR" arduino-cli
-        chmod +x "$LOCAL_CLI"
+        tar xzf /tmp/arduino-cli.tar.gz -C "$APP_DIR" arduino-cli
+        chmod +x "$APP_CLI"
         rm -f /tmp/arduino-cli.tar.gz
-        ARDUINO_CLI="$LOCAL_CLI"
-        echo "  [✓] arduino-cli 已下載"
+        ARDUINO_CLI="$APP_CLI"
+        echo "  [✓] arduino-cli 已下載至 $APP_DIR"
     fi
 fi
 

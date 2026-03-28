@@ -20,8 +20,21 @@ const os = require('os');
  * @returns {string|null}
  */
 function findBootApp0() {
-    const espHwBase = path.join(os.homedir(), '.arduino15', 'packages', 'esp32', 'hardware', 'esp32');
-    if (!fs.existsSync(espHwBase)) return null;
+    // arduino-cli 資料目錄因作業系統而異：
+    //   macOS  → ~/Library/Arduino15
+    //   Linux  → ~/.arduino15
+    //   Windows→ %APPDATA%/Arduino15
+    const candidates = [
+        path.join(os.homedir(), 'Library', 'Arduino15'),   // macOS
+        path.join(os.homedir(), '.arduino15'),              // Linux / Docker
+        path.join(process.env.APPDATA || '', 'Arduino15'), // Windows
+    ];
+    let espHwBase = null;
+    for (const base of candidates) {
+        const p = path.join(base, 'packages', 'esp32', 'hardware', 'esp32');
+        if (fs.existsSync(p)) { espHwBase = p; break; }
+    }
+    if (!espHwBase) return null;
     let versions;
     try {
         versions = fs.readdirSync(espHwBase).filter(n => fs.statSync(path.join(espHwBase, n)).isDirectory());
