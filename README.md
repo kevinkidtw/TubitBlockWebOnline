@@ -484,53 +484,31 @@ TubitBlockWeb線上編譯版/
 
 ### v1.2 — 2026-03-27
 
-**新增功能：**
-
-- **串口監視器 Web Serial 支援**：新增透過 Web Serial API 的串口監視器功能，可在瀏覽器中即時查看 ESP32 的串口輸出資料，並修復 `driveVectorOpen` 空值 bug。
-
-- **USB 拔插自動偵測**：監聽 `navigator.serial` 的 `disconnect` 事件，當 USB 裝置被拔除時自動清理連線狀態（`isOpen`、`port`、`reader`、`writer`），並主動通知 GUI 已斷線。下次上傳時會直接彈出裝置選擇視窗，不再需要等到燒錄失敗後才發現。
-  - `SerialManager.js`：新增 `_handleDisconnect()` 方法與 `onDisconnected` callback。
-  - `LinkIntersector.js`：上傳前加入 port 有效性雙重檢查（`!isOpen || !port`）。
-
-- **專案檔儲存與載入（.tb 格式）**：在瀏覽器環境中完整實作 `.tb` 專案檔的儲存與載入功能。
-  - 儲存：攔截 GUI 的 `<a download>` 動作，將副檔名統一為 `.tb`。
-  - 載入：替換原本永遠回傳「取消」的 `showOpenDialog` stub，改以真實的 `<input type="file">` 檔案選擇器實作；透過純 JavaScript ZIP 解壓縮（EOCD 掃描 + `DecompressionStream('deflate-raw')`）從 `.tb` 檔讀取 `project.json`，並繞過 GUI 內部已損壞的 AJV 版本驗證器，直接呼叫 `deserializeProject()` 還原積木程式與設備選擇。
-  - 相容 `.sb3`、`.ob`、`.tb` 三種副檔名（ZIP 格式均可正確解壓）。
-
-- **修復編譯進度訊息未即時顯示**：雲端編譯開始時，「⏳ 等待雲端編譯中…」提示訊息未立即出現於 GUI 訊息視窗。根本原因：`result: null` 與 `uploadStdout` 訊息在同一個同步 event loop tick 內連續送出，React 尚未完成面板的 re-render，導致訊息遺失。修復方式：在送出 `result: null` 後插入 200ms 延遲，確保 GUI 面板渲染完成再送出進度訊息。
-
+- 新增串口監視器 Web Serial 支援
+- 新增 USB 拔插自動偵測，斷線時自動清理連線狀態
+- 新增專案檔儲存與載入（`.tb` 格式，相容 `.sb3`、`.ob`）
+- 修復編譯進度訊息未即時顯示（插入 200ms 延遲等待 React re-render）
 
 ---
 
 ### v1.12
 
-**問題修復：**
-
-- **修復 GUI 上傳超時**：ESP32 燒錄約需 20~30 秒，超過 GUI 的 JSON-RPC 內部 timeout，導致訊息視窗顯示「上傳超時」，即使燒錄實際成功。修復方式：在取得序列埠後立即提前回覆 JSON-RPC 確認訊息（`result: null`），GUI 不再等待整個燒錄過程；燒錄進度與完成通知仍會正常顯示。
-
-- **修復燒錄期間點擊「編譯」導致第二次編譯失敗**：燒錄進行中時 GUI 切換至上傳進度視圖，此時 `getCurrentCodeFromGUI()` 讀取的並非正確程式碼，會送出殘缺的程式碼造成 400 編譯錯誤。修復方式：新增 `isUploading` 旗標，燒錄進行中點擊「編譯」會顯示提示「正在燒錄中，請等待燒錄完成後再編譯」；同時加強程式碼合法性驗證（長度過短或缺少 `void setup/loop` 時拒絕送出）。
-
-- **修復 GUI 燒錄訊息重複顯示**：GUI 訊息視窗中每條燒錄進度訊息會出現兩次。原因：假 WebSocket 物件（`createFakeLinkWebSocket`）的 `dispatchEvent` 覆寫同時觸發了 `addEventListener` 監聽器與 `on*` 屬性處理器，造成重複派送。修復方式：改用 `Object.defineProperty` setter，讓 `on*` 屬性透過 `addEventListener` 統一管理，使用原生 EventTarget 派送，每條訊息只觸發一次。
-
-- **修復燒錄後重新連接需要 F5**：燒錄完成後點擊「連接」，若序列埠已在燒錄後自動重開，現在直接回報連線成功，不再彈出瀏覽器序列埠選擇器。
-
-- **修復跨來源存取被封鎖 (CORS)**：從 GitHub Pages 等外部網址存取編譯伺服器時，Synology NAS nginx 的 60 秒 timeout 會在編譯完成前超時並回傳無 CORS 標頭的 Synology 錯誤頁面，導致瀏覽器顯示 CORS 錯誤。修復方式：將 nginx `proxy_read_timeout` / `proxy_send_timeout` 延長至 300 秒，並加入 `add_header 'Access-Control-Allow-Origin' '*' always` 確保所有回應（含錯誤頁）皆帶有 CORS 標頭；使用 `proxy_hide_header` 避免 CORS 標頭重複。
-
-- **修復 libTuBitCore.a ABI 版本不符**：Docker 容器原使用 `esp32:esp32@3.1.1`，但 `custom_libraries/TuBitCore` 的預編譯靜態庫是針對 ESP32 core 3.1.3 編譯，導致燒錄後韌體執行期崩潰或無回應。修復方式：`Dockerfile` 改用 `esp32:esp32@3.1.3`，版本與靜態庫 ABI 一致。
-
-**外觀更新：**
-
-- 瀏覽器分頁圖示（favicon）、書籤圖示與縮圖 logo 改為 TuBit 橘色方塊圖示
-- 頁面標題改為「TubitBlock Web」
+- 修復 GUI 上傳超時（提前回覆 JSON-RPC 確認，不等待燒錄完成）
+- 修復燒錄期間點擊「編譯」導致第二次編譯失敗
+- 修復 GUI 燒錄訊息重複顯示
+- 修復燒錄後重新連接需要 F5
+- 修復 CORS 跨來源存取被封鎖（NAS nginx timeout 延長至 300 秒）
+- 修復 `libTuBitCore.a` ABI 版本不符（Docker 改用 `esp32:esp32@3.1.3`）
+- 更新瀏覽器 favicon 與頁面標題為「TubitBlock Web」
 
 ---
 
 ### v1.1
 
-- **零安裝架構**：移除 `tubitblock-link` 本機服務，改以雲端 Docker 編譯 + 瀏覽器 Web Serial 燒錄
-- **WebSocket 攔截器**：`LinkIntersector.js` 攔截 GUI 的上傳請求，無縫接入雲端編譯流程
-- **編譯快取機制**：程式碼未修改時直接使用快取的 `.bin` 檔案，跳過重複編譯
-- **正確 ESP32 燒錄分區**：伺服器明確回傳每個 `.bin` 檔的燒錄地址（`flashAddresses`），包含自動注入 `boot_app0.bin`
+- 零安裝架構：改以雲端 Docker 編譯 + 瀏覽器 Web Serial 燒錄
+- `LinkIntersector.js` 攔截 GUI 上傳請求，接入雲端編譯流程
+- 編譯快取機制：程式碼未修改時直接使用快取 `.bin`
+- 正確 ESP32 燒錄分區：伺服器回傳 `flashAddresses`，自動注入 `boot_app0.bin`
 - **完整 FQBN 支援**：使用含 `FlashMode=qio,FlashFreq=80,CPUFreq=240` 等完整選項的 FQBN 進行編譯，確保與桌面版行為一致
 - **二次重置機制**：燒錄後自動透過 Web Serial 發送 200ms RTS 重置脈衝，提升自動重啟成功率
 - **自動重開序列埠**：燒錄完成後自動嘗試恢復序列埠連線
