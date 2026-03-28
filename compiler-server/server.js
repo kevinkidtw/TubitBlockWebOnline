@@ -160,6 +160,15 @@ app.post('/compile', async (req, res) => {
         fs.mkdirSync(sketchDir, { recursive: true });
         fs.mkdirSync(buildDir, { recursive: true });
 
+        if (!/void\s+setup\s*\(\s*\)/.test(sourceCode)) {
+            sourceCode += '\nvoid setup() {\n}\n';
+            console.log(`[Compile] Injected missing void setup()`);
+        }
+        if (!/void\s+loop\s*\(\s*\)/.test(sourceCode)) {
+            sourceCode += '\nvoid loop() {\n}\n';
+            console.log(`[Compile] Injected missing void loop()`);
+        }
+
         const sketchFile = path.join(sketchDir, 'sketch.ino');
         fs.writeFileSync(sketchFile, sourceCode, 'utf8');
 
