@@ -1,6 +1,9 @@
 #include "ps4.h"
 #include <esp_system.h>
 #include <string.h>
+#if __has_include(<esp_mac.h>)
+#include <esp_mac.h>
+#endif
 #include "ps4_int.h"
 
 /* Detect ESP-IDF releases */

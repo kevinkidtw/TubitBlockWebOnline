@@ -2,6 +2,9 @@
 #include <stdbool.h>
 #include <string.h>
 #include <esp_system.h>
+#if __has_include(<esp_mac.h>)
+#include <esp_mac.h>
+#endif
 #include "include/ps3.h"
 #include "include/ps3_int.h"
 
