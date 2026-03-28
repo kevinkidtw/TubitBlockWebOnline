@@ -463,7 +463,27 @@ TubitBlockWeb線上編譯版/
 
 ## 十、版本更新紀錄
 
-### v1.2（目前版本）— 2026-03-27
+### v1.5（目前版本）— 2026-03-29
+
+**問題修復：**
+
+- **修復本地編譯器工具鏈路徑不穩定**：`start_link.sh` / `start_link.ps1` 原本以腳本所在位置為基準下載依賴，腳本移動或從任意目錄執行時路徑即失效。修復方式：改用固定 app 目錄（macOS/Linux `~/.tubitblock/`、Windows `%APPDATA%\TubitBlock\`）統一存放 `compiler-server`、`arduino-cli` 所有工具鏈，與腳本位置無關。
+
+- **修復 `findBootApp0()` macOS 路徑錯誤**：原本只搜尋 Linux 路徑 `~/.arduino15`，在 macOS 上無法找到 `boot_app0.bin`，導致燒錄後 ESP32 無法確定啟動分區。修復方式：改用 candidates 陣列依序嘗試 macOS（`~/Library/Arduino15`）、Linux（`~/.arduino15`）、Windows（`%APPDATA%\Arduino15`）三個路徑。
+
+- **修復 Windows ESP32 版本不檢查**：`start_link.ps1` 原本只檢查 `esp32:esp32` 是否已安裝，不驗證版本號，若裝的是舊版本（如 2.x）仍會跳過安裝。修復方式：加入正則表達式版本比對，若版本不符 `3.1.3` 自動重新安裝。
+
+- **修復 `#include` 放置於函數後導致編譯失敗**：TubitBlock 積木程式碼生成器有時會將 `#include` 語句放在 `void setup()` 或 `void loop()` 之後，在 C++ 中不合法。修復方式：`server.js` 在呼叫 `arduino-cli` 前將所有 `#include` 行提升至程式碼頂端。
+
+- **修復缺少結尾大括號導致 `expected '}'` 錯誤**：TubitBlock 程式碼生成器有時會少產生 `void loop()` 或其他區塊的結尾 `}`。修復方式：`server.js` 計算 `{` 與 `}` 的數量差值，自動在末尾補齊缺少的括號。
+
+- **修復 Ace editor 虛擬化渲染導致程式碼截斷**：使用 `querySelectorAll('.ace_line')` 抓取程式碼 DOM 時，因 Ace editor 虛擬化渲染機制只渲染可見行，捲動後程式碼會被截斷。修復方式：優先使用 `aceEl.env.editor.getValue()` 取得完整程式碼，DOM 抓取僅作備援。
+
+- **修復 ARDUINO_CLI 路徑含空白導致 exec 失敗**：Windows 用戶名包含空格時（如 `C:\Users\Kevin Kid\...`），`exec` 指令中未加引號的路徑會被 shell 拆分。修復方式：`server.js` 的 `exec` 指令對 `ARDUINO_CLI`、`boardFqbn`、`buildPath`、`sketchDir` 等路徑一律加上雙引號。
+
+---
+
+### v1.2 — 2026-03-27
 
 **新增功能：**
 
