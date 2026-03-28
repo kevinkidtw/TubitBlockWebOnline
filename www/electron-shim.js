@@ -1745,8 +1745,8 @@
                         var osHint = isWindows
                             ? '請雙擊下載的 start_compiler.bat 執行安裝。'
                             : (isMac
-                                ? '請在終端機中執行：\nchmod +x ~/Downloads/' + fileName + ' && ~/Downloads/' + fileName
-                                : '請在終端機中執行：\nchmod +x ' + fileName + ' && ./' + fileName);
+                                ? '請開啟終端機（Launchpad → 終端機），輸入：\nbash ~/Downloads/' + fileName
+                                : '請在終端機中執行：\nbash ' + fileName);
                         alert('✅ 腳本已下載！\n\n' + osHint + '\n\n安裝完成後，在工具列切換到「💻 本地」即可使用本地編譯。');
                     }, 500);
                 })
