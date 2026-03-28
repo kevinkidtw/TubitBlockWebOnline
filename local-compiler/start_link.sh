@@ -130,15 +130,23 @@ else
     fi
 fi
 
-# 安裝 ESP32 核心
-ESP32_CORE_INSTALLED=$("$ARDUINO_CLI" core list 2>/dev/null | grep -c "esp32:esp32" || true)
-if [ "$ESP32_CORE_INSTALLED" -eq 0 ]; then
-    echo "  正在安裝 ESP32 核心 (esp32:esp32@3.1.3)，首次約需 3-5 分鐘..."
+# 安裝 ESP32 核心（必須是 3.1.3，預編譯函式庫僅與此版本相容）
+REQUIRED_ESP32_VER="3.1.3"
+ESP32_CURRENT_VER=$("$ARDUINO_CLI" core list 2>/dev/null | grep "esp32:esp32" | awk '{print $2}' || true)
+
+if [ "$ESP32_CURRENT_VER" = "$REQUIRED_ESP32_VER" ]; then
+    echo "  [✓] ESP32 核心已安裝 (v${REQUIRED_ESP32_VER})"
+elif [ -n "$ESP32_CURRENT_VER" ]; then
+    echo "  ⚠️  偵測到 ESP32 核心版本 v${ESP32_CURRENT_VER}，但預編譯函式庫需要 v${REQUIRED_ESP32_VER}"
+    echo "  正在切換至 v${REQUIRED_ESP32_VER}..."
     "$ARDUINO_CLI" core update-index --additional-urls "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
-    "$ARDUINO_CLI" core install esp32:esp32@3.1.3 --additional-urls "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
-    echo "  [✓] ESP32 核心安裝完成"
+    "$ARDUINO_CLI" core install "esp32:esp32@${REQUIRED_ESP32_VER}" --additional-urls "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+    echo "  [✓] ESP32 核心已切換至 v${REQUIRED_ESP32_VER}"
 else
-    echo "  [✓] ESP32 核心已安裝"
+    echo "  正在安裝 ESP32 核心 (esp32:esp32@${REQUIRED_ESP32_VER})，首次約需 3-5 分鐘..."
+    "$ARDUINO_CLI" core update-index --additional-urls "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+    "$ARDUINO_CLI" core install "esp32:esp32@${REQUIRED_ESP32_VER}" --additional-urls "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+    echo "  [✓] ESP32 核心安裝完成 (v${REQUIRED_ESP32_VER})"
 fi
 
 # ---- 第四步：安裝 npm 依賴並啟動 ----
