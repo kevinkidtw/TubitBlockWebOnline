@@ -194,6 +194,17 @@ app.post('/compile', async (req, res) => {
             console.log(`[Compile] Injected missing void loop()`);
         }
 
+        // 補全缺少的結尾大括號（TubitBlock 有時會少產生一個 }）
+        {
+            const opens  = (sourceCode.match(/\{/g) || []).length;
+            const closes = (sourceCode.match(/\}/g) || []).length;
+            const diff = opens - closes;
+            if (diff > 0) {
+                sourceCode += '\n' + '}'.repeat(diff);
+                console.log(`[Compile] Appended ${diff} missing closing brace(s)`);
+            }
+        }
+
         const sketchFile = path.join(sketchDir, 'sketch.ino');
         fs.writeFileSync(sketchFile, sourceCode, 'utf8');
 

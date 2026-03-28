@@ -393,25 +393,35 @@
 
     // 從 GUI 取得當前的程式碼與 board 設定
     function getCurrentCodeFromGUI() {
-        // 嘗試從 GUI 的 Ace editor 取得程式碼，必須逐行取得以保留換行符號
+        // 優先使用 Ace editor API 取得完整內容（不受捲動位置影響）
+        // Ace editor 是虛擬化渲染，DOM 中只有可見行；必須透過 API 才能拿到全部程式碼
+        const aceEl = document.querySelector('.ace_editor');
+        if (aceEl && aceEl.env && aceEl.env.editor) {
+            const code = aceEl.env.editor.getValue();
+            if (code && code.trim().length > 0) {
+                return code.replace(/\u00A0/g, ' ');
+            }
+        }
+
+        // 備援：DOM 行抓取（只含可見行，可能不完整）
         const aceLines = document.querySelectorAll('.ace_line');
         if (aceLines.length > 0) {
             // 替換掉 non-breaking space (\xA0) 為一般空白，否則 C++ 編譯會報錯 "extended character..."
             return Array.from(aceLines).map(l => l.textContent.replace(/\u00A0/g, ' ')).join('\n');
         }
-        
+
         // 如果沒有 Ace editor，退路：嘗試取得 Monaco editor 內容
         const monacoLines = document.querySelectorAll('.view-line');
         if (monacoLines.length > 0) {
             return Array.from(monacoLines).map(l => l.textContent.replace(/\u00A0/g, ' ')).join('\n');
         }
-        
+
         // 再退一步，如果只有純 text layer (雖然這會失去換行，但留作備用)
         const codeEditor = document.querySelector('.ace_text-layer');
         if (codeEditor) {
             return codeEditor.textContent || '';
         }
-        
+
         return null;
     }
 
