@@ -465,21 +465,20 @@ TubitBlockWeb線上編譯版/
 
 ### v1.5（目前版本）— 2026-03-29
 
+**新增功能：**
+
+- **GUI 新增本地編譯按鈕**：除雲端編譯外，GUI 介面新增「💻 本地」切換模式，可將編譯請求導向本機運行的 `compiler-server`（`http://localhost:3000/compile`）。
+- **本地編譯器一鍵啟動腳本**：提供 macOS/Linux（`start_link.sh`）與 Windows（`start_link.ps1`）啟動腳本，自動安裝 Node.js、arduino-cli、ESP32 core 3.1.3 並啟動本地編譯伺服器。所有工具鏈統一安裝至固定目錄（`~/.tubitblock/` / `%APPDATA%\TubitBlock\`），與腳本擺放位置無關。
+  > ⚠️ Windows 版本尚未完整測試，macOS 版本已驗證可正常運作。
+
 **問題修復：**
 
-- **修復本地編譯器工具鏈路徑不穩定**：`start_link.sh` / `start_link.ps1` 原本以腳本所在位置為基準下載依賴，腳本移動或從任意目錄執行時路徑即失效。修復方式：改用固定 app 目錄（macOS/Linux `~/.tubitblock/`、Windows `%APPDATA%\TubitBlock\`）統一存放 `compiler-server`、`arduino-cli` 所有工具鏈，與腳本位置無關。
-
-- **修復 `findBootApp0()` macOS 路徑錯誤**：原本只搜尋 Linux 路徑 `~/.arduino15`，在 macOS 上無法找到 `boot_app0.bin`，導致燒錄後 ESP32 無法確定啟動分區。修復方式：改用 candidates 陣列依序嘗試 macOS（`~/Library/Arduino15`）、Linux（`~/.arduino15`）、Windows（`%APPDATA%\Arduino15`）三個路徑。
-
-- **修復 Windows ESP32 版本不檢查**：`start_link.ps1` 原本只檢查 `esp32:esp32` 是否已安裝，不驗證版本號，若裝的是舊版本（如 2.x）仍會跳過安裝。修復方式：加入正則表達式版本比對，若版本不符 `3.1.3` 自動重新安裝。
-
-- **修復 `#include` 放置於函數後導致編譯失敗**：TubitBlock 積木程式碼生成器有時會將 `#include` 語句放在 `void setup()` 或 `void loop()` 之後，在 C++ 中不合法。修復方式：`server.js` 在呼叫 `arduino-cli` 前將所有 `#include` 行提升至程式碼頂端。
-
-- **修復缺少結尾大括號導致 `expected '}'` 錯誤**：TubitBlock 程式碼生成器有時會少產生 `void loop()` 或其他區塊的結尾 `}`。修復方式：`server.js` 計算 `{` 與 `}` 的數量差值，自動在末尾補齊缺少的括號。
-
-- **修復 Ace editor 虛擬化渲染導致程式碼截斷**：使用 `querySelectorAll('.ace_line')` 抓取程式碼 DOM 時，因 Ace editor 虛擬化渲染機制只渲染可見行，捲動後程式碼會被截斷。修復方式：優先使用 `aceEl.env.editor.getValue()` 取得完整程式碼，DOM 抓取僅作備援。
-
-- **修復 ARDUINO_CLI 路徑含空白導致 exec 失敗**：Windows 用戶名包含空格時（如 `C:\Users\Kevin Kid\...`），`exec` 指令中未加引號的路徑會被 shell 拆分。修復方式：`server.js` 的 `exec` 指令對 `ARDUINO_CLI`、`boardFqbn`、`buildPath`、`sketchDir` 等路徑一律加上雙引號。
+- 修復 `server.js` 在 macOS 上找不到 `boot_app0.bin`（路徑應為 `~/Library/Arduino15`）
+- 修復 TubitBlock 產生的程式碼將 `#include` 放在函數後導致編譯失敗（自動提升至頂端）
+- 修復程式碼缺少結尾 `}` 導致 `expected '}'` 錯誤（自動補齊括號）
+- 修復 Ace editor 虛擬化渲染只抓可見行，程式碼捲動後被截斷（改用 `editor.getValue()`）
+- 修復 Windows 路徑含空白時 `exec` 指令解析失敗（所有路徑加引號）
+- 修復 Windows 版腳本不檢查 ESP32 core 版本，舊版本不會自動升級
 
 ---
 
