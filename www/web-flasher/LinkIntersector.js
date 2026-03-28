@@ -54,6 +54,12 @@
             compileButton.style.borderTopLeftRadius = '0';
             compileButton.style.borderBottomLeftRadius = '0';
             compileButton.style.transition = 'all 0.2s';
+
+            // 移除複製出的上傳圖示（使用者希望編譯按鈕不要和上傳一樣的圖案，若無合適的寧願不要）
+            const icon = compileButton.querySelector('img') || compileButton.querySelector('svg');
+            if (icon) {
+                icon.remove();
+            }
             
             // 統一更新兩個按鈕的主題/狀態
             function updateTheme() {
