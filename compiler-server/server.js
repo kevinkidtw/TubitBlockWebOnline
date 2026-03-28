@@ -173,6 +173,18 @@ app.post('/compile', async (req, res) => {
         fs.mkdirSync(sketchDir, { recursive: true });
         fs.mkdirSync(buildDir, { recursive: true });
 
+        // TubitBlock 產生的程式碼有時會把 #include 放在 setup()/loop() 之後，
+        // 這在 C++ 中是非法的。將所有 #include 行提到最頂端。
+        {
+            const lines = sourceCode.split('\n');
+            const includes = lines.filter(l => /^\s*#include\s/.test(l));
+            const rest     = lines.filter(l => !/^\s*#include\s/.test(l));
+            if (includes.length > 0) {
+                sourceCode = includes.join('\n') + '\n' + rest.join('\n');
+                console.log(`[Compile] Hoisted ${includes.length} #include(s) to top`);
+            }
+        }
+
         if (!/void\s+setup\s*\(\s*\)/.test(sourceCode)) {
             sourceCode += '\nvoid setup() {\n}\n';
             console.log(`[Compile] Injected missing void setup()`);
