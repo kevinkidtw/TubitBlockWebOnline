@@ -38,32 +38,44 @@
         if (uploadButton && !document.getElementById('web-flasher-compile-btn')) {
             console.log('[Intersector] Found Upload button, injecting Compile + Toggle buttons...');
             
-            // === 編譯按鈕 ===
-            const compileButton = uploadButton.cloneNode(true);
-            compileButton.id = 'web-flasher-compile-btn';
-            const textSpan = compileButton.querySelector('span');
-            if (textSpan) {
-                textSpan.textContent = '編譯 (' + getCompileModeLabel() + ')';
-            }
-            compileButton.style.backgroundColor = '#155bb5';
-            compileButton.style.marginRight = '6px';
-            compileButton.addEventListener('click', (e) => {
-                e.stopPropagation();
-                console.log('[Intersector] Compile button clicked!');
-                handleCompileOnly(compileButton);
-            });
-            uploadButton.parentNode.insertBefore(compileButton, uploadButton);
-
             // === 模式切換按鈕 ===
             const toggleBtn = document.createElement('div');
             toggleBtn.id = 'web-flasher-mode-toggle';
             toggleBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;' +
-                'padding:4px 10px;margin-right:6px;border-radius:4px;cursor:pointer;' +
+                'padding:4px 10px;margin-right:1px;border-radius:4px 0 0 4px;cursor:pointer;' +
                 'font-size:12px;font-weight:bold;color:#fff;user-select:none;' +
-                'transition:background-color 0.2s;min-width:60px;height:32px;';
-            toggleBtn.style.backgroundColor = (compileMode === 'local') ? '#2e7d32' : '#1565c0';
-            toggleBtn.textContent = getCompileModeLabel();
+                'transition:all 0.2s;min-width:60px;height:32px;box-sizing:border-box;';
             toggleBtn.title = '切換本地/線上編譯模式';
+
+            // === 編譯按鈕 ===
+            const compileButton = uploadButton.cloneNode(true);
+            compileButton.id = 'web-flasher-compile-btn';
+            compileButton.style.marginRight = '6px';
+            compileButton.style.borderTopLeftRadius = '0';
+            compileButton.style.borderBottomLeftRadius = '0';
+            compileButton.style.transition = 'all 0.2s';
+            
+            // 統一更新兩個按鈕的主題/狀態
+            function updateTheme() {
+                const isLocal = compileMode === 'local';
+                // 線上為深藍色，本地為深橘色(對比凸顯)
+                const themeColor = isLocal ? '#e65100' : '#1565c0';
+                
+                toggleBtn.textContent = getCompileModeLabel();
+                toggleBtn.style.backgroundColor = themeColor;
+                
+                compileButton.style.backgroundColor = themeColor;
+                compileButton.style.borderColor = themeColor; // 確保若原本帶有邊框顏色也會同步
+                const textSpan = compileButton.querySelector('span');
+                if (textSpan) {
+                    textSpan.textContent = '編譯 (' + getCompileModeLabel() + ')';
+                }
+            }
+
+            compileButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                handleCompileOnly(compileButton);
+            });
 
             toggleBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -72,11 +84,12 @@
                     return;
                 }
 
-                // 切換模式
                 if (compileMode === 'online') {
                     // 切到本地：先 ping localhost:3000
                     toggleBtn.textContent = '⏳ 偵測中...';
                     toggleBtn.style.backgroundColor = '#757575';
+                    compileButton.style.backgroundColor = '#757575';
+                    compileButton.style.borderColor = '#757575';
                     try {
                         const resp = await fetch('http://localhost:3000/', {
                             method: 'GET',
@@ -93,8 +106,7 @@
                         alert('⚠️ 無法連接本地編譯伺服器 (localhost:3000)\n\n' +
                               '請先執行「部署本地編譯器」下載的啟動腳本。\n' +
                               '（齒輪選單 → 部署本地編譯器）');
-                        toggleBtn.textContent = getCompileModeLabel();
-                        toggleBtn.style.backgroundColor = '#1565c0';
+                        updateTheme(); // 回復原本外觀
                         return;
                     }
                 } else {
@@ -108,28 +120,21 @@
                 cachedFlashAddresses = null;
                 cachedCodeHash = null;
 
-                // 持久化
+                // 持久化並更新外觀
                 localStorage.setItem('tubitblock_compile_mode', compileMode);
-
-                // 更新按鈕外觀
-                toggleBtn.textContent = getCompileModeLabel();
-                toggleBtn.style.backgroundColor = (compileMode === 'local') ? '#2e7d32' : '#1565c0';
-
-                // 同步更新編譯按鈕文字
-                const compileBtnSpan = document.querySelector('#web-flasher-compile-btn span');
-                if (compileBtnSpan) {
-                    compileBtnSpan.textContent = '編譯 (' + getCompileModeLabel() + ')';
-                }
+                updateTheme();
             });
 
-            // hover 效果
-            toggleBtn.addEventListener('mouseenter', () => {
-                toggleBtn.style.opacity = '0.85';
-            });
-            toggleBtn.addEventListener('mouseleave', () => {
-                toggleBtn.style.opacity = '1';
-            });
+            // 初始化套用主題
+            updateTheme();
 
+            // Hover 效果同步
+            toggleBtn.addEventListener('mouseenter', () => toggleBtn.style.opacity = '0.85');
+            toggleBtn.addEventListener('mouseleave', () => toggleBtn.style.opacity = '1');
+            compileButton.addEventListener('mouseenter', () => compileButton.style.opacity = '0.85');
+            compileButton.addEventListener('mouseleave', () => compileButton.style.opacity = '1');
+
+            uploadButton.parentNode.insertBefore(compileButton, uploadButton);
             uploadButton.parentNode.insertBefore(toggleBtn, compileButton);
         }
     }
