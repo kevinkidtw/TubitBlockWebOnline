@@ -42,9 +42,9 @@
             const toggleBtn = document.createElement('div');
             toggleBtn.id = 'web-flasher-mode-toggle';
             toggleBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;' +
-                'padding:0 20px;margin-right:1px;border-radius:4px 0 0 4px;cursor:pointer;' +
+                'padding:0 15px;margin-right:1px;border-radius:4px 0 0 4px;cursor:pointer;' +
                 'font-size:12px;font-weight:bold;color:#fff;user-select:none;' +
-                'transition:all 0.2s;width:130px;height:32px;box-sizing:border-box;';
+                'transition:all 0.2s;min-width:70px;height:32px;box-sizing:border-box;';
             toggleBtn.title = '切換本地/線上編譯模式';
 
             // === 編譯按鈕 ===
@@ -54,8 +54,8 @@
             compileButton.style.borderTopLeftRadius = '0';
             compileButton.style.borderBottomLeftRadius = '0';
             compileButton.style.transition = 'all 0.2s';
-            compileButton.style.width = '130px';
-            compileButton.style.padding = '0 20px';
+            compileButton.style.minWidth = '70px';
+            compileButton.style.padding = '0 15px';
             compileButton.style.boxSizing = 'border-box';
             compileButton.style.display = 'inline-flex';
             compileButton.style.justifyContent = 'center';
