@@ -410,9 +410,33 @@
 
     // 從 GUI 取得當前的程式碼與 board 設定
     function getCurrentCodeFromGUI() {
-        // 優先使用 Ace editor API 取得完整內容（不受捲動位置影響）
-        // Ace editor 是虛擬化渲染，DOM 中只有可見行；必須透過 API 才能拿到全部程式碼
+        // --- 修正 Stale Code Bug ---
+        // 判斷當前是否處於純積木模式：ACE Editor 若隱藏 (offsetParent === null)，代表當前在積木模式
         const aceEl = document.querySelector('.ace_editor');
+        const isCodeMode = aceEl && aceEl.offsetParent !== null;
+
+        if (!isCodeMode) {
+            // 積木模式下，強制呼叫 Blockly 工作區重新生成最新程式碼，避免讀到隱藏文本編輯器裡的過期快取
+            try {
+                const B = window.Blockly || window.ScratchBlocks;
+                if (B && typeof B.getMainWorkspace === 'function') {
+                    const ws = B.getMainWorkspace();
+                    const gen = B.Arduino || B.arduino;
+                    if (ws && gen && typeof gen.workspaceToCode === 'function') {
+                        let generated = gen.workspaceToCode(ws);
+                        if (generated && generated.trim().length > 0) {
+                            console.log('[Intersector] 成功直接從 Blockly 工作區生成最新程式碼');
+                            return generated.replace(/\u00A0/g, ' ');
+                        }
+                    }
+                }
+            } catch(e) {
+                console.warn('[Intersector] 嘗試直接從 Blockly 生成失敗，退回使用編輯器快取', e);
+            }
+        }
+
+        // 優先使用 Ace editor API 取得完整內容（若在代碼模式則受編輯影響）
+        // Ace editor 是虛擬化渲染，必須透過 API 才能拿到全部程式碼
         if (aceEl && aceEl.env && aceEl.env.editor) {
             const code = aceEl.env.editor.getValue();
             if (code && code.trim().length > 0) {
