@@ -64,7 +64,8 @@ function registerBlocksMessages (Blockly) {
         "PS3_CONTROLLER_GET_BATTERY": "PS3 battery level",
         "PS3_ON_BUTTON_EVENT": "When PS3 button %1 is %2",
         "PS3_ON_CONNECT_EVENT": "When PS3 is %1",
-        "PS3_ON_JOYSTICK_CHANGE": "When %1 axis changes"
+        "PS3_ON_JOYSTICK_CHANGE": "When %1 axis changes",
+        "PS3_ON_NOTIFY": "When PS3 receives data"
     });
 
     Object.assign(Blockly.ScratchMsgs.locales["zh-cn"], {
@@ -104,7 +105,8 @@ function registerBlocksMessages (Blockly) {
         "PS3_CONTROLLER_GET_BATTERY": "PS3电池电量",
         "PS3_ON_BUTTON_EVENT": "当PS3的按键 %1 被 %2 时",
         "PS3_ON_CONNECT_EVENT": "当 PS3 %1 时",
-        "PS3_ON_JOYSTICK_CHANGE": "当 %1 轴的数值发生变化时"
+        "PS3_ON_JOYSTICK_CHANGE": "当 %1 轴的数值发生变化时",
+        "PS3_ON_NOTIFY": "当 PS3 收到资料时"
     });
 
     Object.assign(Blockly.ScratchMsgs.locales["zh-tw"], {
@@ -144,7 +146,8 @@ function registerBlocksMessages (Blockly) {
         "PS3_CONTROLLER_GET_BATTERY": "PS3電池電量",
         "PS3_ON_BUTTON_EVENT": "當 PS3 的按鈕 %1 被 %2 時",
         "PS3_ON_CONNECT_EVENT": "當 PS3 %1 時",
-        "PS3_ON_JOYSTICK_CHANGE": "當 %1 軸的值改變時"
+        "PS3_ON_JOYSTICK_CHANGE": "當 %1 軸的值改變時",
+        "PS3_ON_NOTIFY": "當 PS3 收到資料時"
     });
 
     return Blockly;

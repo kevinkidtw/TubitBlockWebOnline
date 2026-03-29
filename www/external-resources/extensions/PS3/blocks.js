@@ -140,6 +140,22 @@ function registerBlocks (Blockly) {
         }
     };
 
+    Blockly.Blocks.ps3_controller_on_notify = {
+        init: function () {
+            this.jsonInit({
+                message0: Blockly.Msg.PS3_ON_NOTIFY,
+                message1: '%1',
+                args1: [{
+                    type: 'input_statement',
+                    name: 'SUBSTACK'
+                }],
+                colour: color,
+                secondaryColour: color,
+                extensions: ['shape_statement']
+            });
+        }
+    };
+
     return Blockly;
 }
 

@@ -45,6 +45,17 @@ function registerGenerators (Blockly) {
         return [code, Blockly.Arduino.ORDER_ATOMIC];
     }
 
+    Blockly.Arduino.ps3_controller_on_notify = function (block) {
+        Blockly.Arduino.includes_.esp32_ps3 = `#include <Ps3Controller.h>`;
+        var branch = Blockly.Arduino.statementToCode(block, 'SUBSTACK');
+        let code = `void ps3Notify(void *) {\n`;
+        code += branch.slice(2).replace(/\n  /g, '\n');
+        code += `}\n`;
+        Blockly.Arduino.definitions_.ps3_controller_on_notify = code;
+        Blockly.Arduino.setups_.ps3_controller_on_notify = 'Ps3.attach(ps3Notify);';
+        return '';
+    };
+
     return Blockly;
 }
 

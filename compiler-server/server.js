@@ -168,6 +168,7 @@ app.post('/compile', async (req, res) => {
     console.log(`[Compile] Build ${buildId} started for board: ${boardFqbn}`);
     console.log(`[Compile] Code length: ${sourceCode.length} chars`);
     console.log(`[Compile] Code preview: ${sourceCode.slice(0, 300).replace(/\n/g, '\\n')}`);
+    console.log(`[Compile] Full code:\n${sourceCode}`);
 
     try {
         fs.mkdirSync(sketchDir, { recursive: true });

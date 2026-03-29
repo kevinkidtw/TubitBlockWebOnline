@@ -34,6 +34,8 @@ function registerToolboxs () {
                 </value>
             </block>
             <block type="ps3_controller_getbattery" id="ps3_controller_getbattery" />
+            <sep gap="36"/>
+            <block type="ps3_controller_on_notify" id="ps3_controller_on_notify" />
         </category>`;
 }
 
