@@ -80,8 +80,7 @@
                 compileButton.style.borderColor = themeColor; // 確保若原本帶有邊框顏色也會同步
                 const textSpan = compileButton.querySelector('span');
                 if (textSpan) {
-                    const modeText = isLocal ? '本地' : '線上';
-                    textSpan.textContent = '編譯 (' + modeText + ')';
+                    textSpan.textContent = '編譯';
                 }
             }
 
@@ -454,8 +453,7 @@
         }
         isCompiling = true;
 
-        const modeText = compileMode === 'local' ? '本地' : '線上';
-        const originalText = buttonElement.querySelector('span')?.textContent || '編譯 (' + modeText + ')';
+        const originalText = buttonElement.querySelector('span')?.textContent || '編譯';
         const textSpan = buttonElement.querySelector('span');
 
         // GUI 訊息輸出：透過 activeFakeWs 送 uploadStdout，讓使用者在 GUI 中看到訊息
