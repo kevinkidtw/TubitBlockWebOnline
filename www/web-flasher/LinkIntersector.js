@@ -409,7 +409,7 @@
     }
 
     // 從 GUI 取得當前的程式碼與 board 設定
-    function getCurrentCodeFromGUI() {
+    function getCurrentCodeFromGUI(logger) {
         // --- 修正 Stale Code Bug ---
         // 判斷當前是否處於純積木模式：ACE Editor 若隱藏 (offsetParent === null)，代表當前在積木模式
         const aceEl = document.querySelector('.ace_editor');
@@ -419,22 +419,34 @@
             // 積木模式下，強制呼叫 Blockly 工作區重新生成最新程式碼，避免讀到隱藏文本編輯器裡的過期快取
             try {
                 const B = window.Blockly || window.ScratchBlocks;
+                if (logger) logger(`[Debug] window.Blockly/ScratchBlocks exists: ${!!B}`);
+                
                 if (B && typeof B.getMainWorkspace === 'function') {
                     const ws = B.getMainWorkspace();
-                    const gen = B.Arduino || B.arduino;
+                    if (logger) logger(`[Debug] getMainWorkspace executed, ws exists: ${!!ws}`);
+                    
+                    const gen = B.Arduino || B.arduino || B.ScratchBlocks?.Arduino;
+                    if (logger) logger(`[Debug] B.Arduino exists: ${!!gen}, type of workspaceToCode: ${gen ? typeof gen.workspaceToCode : 'undefined'}`);
+                    
                     if (ws && gen && typeof gen.workspaceToCode === 'function') {
                         let generated = gen.workspaceToCode(ws);
+                        if (logger) logger(`[Debug] generated code length: ${generated ? generated.length : 0}`);
+                        
                         if (generated && generated.trim().length > 0) {
                             console.log('[Intersector] 成功直接從 Blockly 工作區生成最新程式碼');
                             return generated.replace(/\u00A0/g, ' ');
                         }
                     }
+                } else if (logger) {
+                    logger(`[Debug] typeof B.getMainWorkspace: ${B ? typeof B.getMainWorkspace : 'N/A'}`);
                 }
             } catch(e) {
                 console.warn('[Intersector] 嘗試直接從 Blockly 生成失敗，退回使用編輯器快取', e);
+                if (logger) logger(`[Debug] Exception: ${e.message}`);
             }
         }
 
+        if (logger) logger(`[Debug] 退回讀取 Ace Editor (isCodeMode=${isCodeMode})`);
         // 優先使用 Ace editor API 取得完整內容（若在代碼模式則受編輯影響）
         // Ace editor 是虛擬化渲染，必須透過 API 才能拿到全部程式碼
         if (aceEl && aceEl.env && aceEl.env.editor) {
@@ -510,7 +522,7 @@
             }
 
             // 取得當前程式碼
-            const currentCode = getCurrentCodeFromGUI();
+            const currentCode = getCurrentCodeFromGUI(logger);
             if (!currentCode || currentCode.trim().length < 20) {
                 throw new Error('無法從編輯器取得程式碼。請確認已選擇裝置並切換到程式碼檢視。');
             }
