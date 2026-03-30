@@ -425,8 +425,25 @@
                     const ws = B.getMainWorkspace();
                     if (logger) logger(`[Debug] getMainWorkspace executed, ws exists: ${!!ws}`);
                     
-                    const gen = B.Arduino || B.arduino || B.ScratchBlocks?.Arduino;
-                    if (logger) logger(`[Debug] B.Arduino exists: ${!!gen}, type of workspaceToCode: ${gen ? typeof gen.workspaceToCode : 'undefined'}`);
+                    // 動態尋找擁有 workspaceToCode 函式的生成器
+                    let gen = null;
+                    if (B.Arduino && typeof B.Arduino.workspaceToCode === 'function') gen = B.Arduino;
+                    else if (B.arduino && typeof B.arduino.workspaceToCode === 'function') gen = B.arduino;
+                    else {
+                        for (let k of Object.keys(B)) {
+                            if (B[k] && typeof B[k].workspaceToCode === 'function') {
+                                gen = B[k];
+                                if (logger) logger(`[Debug] Found generator via iteration: B.${k}`);
+                                break;
+                            }
+                        }
+                    }
+                    // 還有可能是放在 window 全域 (例如 window.ArduinoGenerator)
+                    if (!gen && window.Arduino && typeof window.Arduino.workspaceToCode === 'function') {
+                        gen = window.Arduino;
+                    }
+
+                    if (logger) logger(`[Debug] Generator exists: ${!!gen}`);
                     
                     if (ws && gen && typeof gen.workspaceToCode === 'function') {
                         let generated = gen.workspaceToCode(ws);
