@@ -409,57 +409,57 @@
     }
 
     // 從 GUI 取得當前的程式碼與 board 設定
-    function getCurrentCodeFromGUI(logger) {
+    async function getCurrentCodeFromGUI(logger) {
         // --- 修正 Stale Code Bug ---
         // 判斷當前是否處於純積木模式：ACE Editor 若隱藏 (offsetParent === null)，代表當前在積木模式
         const aceEl = document.querySelector('.ace_editor');
         const isCodeMode = aceEl && aceEl.offsetParent !== null;
 
         if (!isCodeMode) {
-            // 積木模式下，強制呼叫 Blockly 工作區重新生成最新程式碼，避免讀到隱藏文本編輯器裡的過期快取
+            // 無法從全域拿到 generator，改用「隱形切換分頁大法」：透過模擬點擊切到代碼分頁，讓 GUI 自然生成代碼後，再切回來。
             try {
-                const B = window.Blockly || window.ScratchBlocks;
-                if (logger) logger(`[Debug] window.Blockly/ScratchBlocks exists: ${!!B}`);
-                
-                if (B && typeof B.getMainWorkspace === 'function') {
-                    const ws = B.getMainWorkspace();
-                    if (logger) logger(`[Debug] getMainWorkspace executed, ws exists: ${!!ws}`);
-                    
-                    // 動態尋找擁有 workspaceToCode 函式的生成器
-                    let gen = null;
-                    if (B.Arduino && typeof B.Arduino.workspaceToCode === 'function') gen = B.Arduino;
-                    else if (B.arduino && typeof B.arduino.workspaceToCode === 'function') gen = B.arduino;
-                    else {
-                        for (let k of Object.keys(B)) {
-                            if (B[k] && typeof B[k].workspaceToCode === 'function') {
-                                gen = B[k];
-                                if (logger) logger(`[Debug] Found generator via iteration: B.${k}`);
-                                break;
-                            }
-                        }
-                    }
-                    // 還有可能是放在 window 全域 (例如 window.ArduinoGenerator)
-                    if (!gen && window.Arduino && typeof window.Arduino.workspaceToCode === 'function') {
-                        gen = window.Arduino;
-                    }
+                const ALL_TABS = document.querySelectorAll('.react-tabs__tab');
+                let codeTab = null;
+                let blocksTab = null;
 
-                    if (logger) logger(`[Debug] Generator exists: ${!!gen}`);
-                    
-                    if (ws && gen && typeof gen.workspaceToCode === 'function') {
-                        let generated = gen.workspaceToCode(ws);
-                        if (logger) logger(`[Debug] generated code length: ${generated ? generated.length : 0}`);
-                        
-                        if (generated && generated.trim().length > 0) {
-                            console.log('[Intersector] 成功直接從 Blockly 工作區生成最新程式碼');
-                            return generated.replace(/\u00A0/g, ' ');
-                        }
+                ALL_TABS.forEach(tab => {
+                    if (tab.textContent.includes('代碼') || tab.textContent.includes('程式碼') || tab.textContent.includes('Code')) {
+                        codeTab = tab;
+                    } else if (tab.textContent.includes('積木') || tab.textContent.includes('Blocks')) {
+                        blocksTab = tab;
                     }
-                } else if (logger) {
-                    logger(`[Debug] typeof B.getMainWorkspace: ${B ? typeof B.getMainWorkspace : 'N/A'}`);
+                });
+
+                if (codeTab && blocksTab) {
+                    if (logger) logger(`[Debug] 找到分頁按鈕，執行隱形切換以更新代碼...`);
+                    // 切換過去
+                    codeTab.click();
+                    
+                    // 等待 React 渲染以及 Ace Editor 更新
+                    await new Promise(resolve => setTimeout(resolve, 80));
+
+                    const currentAce = document.querySelector('.ace_editor');
+                    if (currentAce && currentAce.env && currentAce.env.editor) {
+                        const freshCode = currentAce.env.editor.getValue();
+                        if (logger) logger(`[Debug] 切換後成功讀取，新鮮代碼長度: ${freshCode ? freshCode.length : 0}`);
+                        
+                        // 迅速切回原本的積木分頁
+                        blocksTab.click();
+
+                        if (freshCode && freshCode.trim().length > 0) {
+                            console.log('[Intersector] 隱形切換分頁法成功取得最新代碼');
+                            return freshCode.replace(/\u00A0/g, ' ');
+                        }
+                    } else {
+                        // 若發生意外，確保一定要切回積木
+                        blocksTab.click();
+                    }
+                } else {
+                    if (logger) logger(`[Debug] DOM 中找不到符合的分頁按鈕類別`);
                 }
-            } catch(e) {
-                console.warn('[Intersector] 嘗試直接從 Blockly 生成失敗，退回使用編輯器快取', e);
-                if (logger) logger(`[Debug] Exception: ${e.message}`);
+            } catch (err) {
+                 console.warn('[Intersector] 隱形切換分頁出錯:', err);
+                 if (logger) logger(`[Debug] Exception: ${err.message}`);
             }
         }
 
@@ -539,7 +539,7 @@
             }
 
             // 取得當前程式碼
-            const currentCode = getCurrentCodeFromGUI(logger);
+            const currentCode = await getCurrentCodeFromGUI(logger);
             if (!currentCode || currentCode.trim().length < 20) {
                 throw new Error('無法從編輯器取得程式碼。請確認已選擇裝置並切換到程式碼檢視。');
             }
