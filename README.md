@@ -473,11 +473,7 @@ TubitBlockWeb線上編譯版/
 
 **問題修復：**
 
-- 修復「程式碼過時」編譯 Bug：編譯時強制讀取最新 workspace 程式碼，而非使用快取舊版內容。
-- 修復 Monaco editor 實例無法抓取程式碼：新增 Monaco editor 偵測路徑，確保在使用 Monaco 的介面中也能正確提取程式碼。
-- 修復 Ace editor 虛擬化渲染截斷問題：改用智慧迭代找最長有效 Ace editor 實例，解決卷動後程式碼被截斷的情形。
-- 修復 `workspaceToCode` generator 實例遺失：以模擬切換 tab 的方式繞過 generator 實例找不到的問題。
-- 修復 `workspaceToCode` 遞迴搜尋邏輯：改為遞迴搜尋整個物件樹以定位 generator 實例。
+- 修復編譯時無法正確抓取完整程式碼的問題：透過遞迴搜尋 `workspaceToCode` generator 實例、模擬切換 tab 觸發代碼生成、並以迭代方式取得最長有效 editor 內容，確保編譯時使用的是完整且最新的程式碼。
 
 **UI 調整：**
 
