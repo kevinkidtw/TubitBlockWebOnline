@@ -410,13 +410,37 @@
 
     // 從 GUI 取得當前的程式碼與 board 設定
     async function getCurrentCodeFromGUI(logger) {
-        // --- 修正 Stale Code Bug ---
-        // 判斷當前是否處於純積木模式：ACE Editor 若隱藏 (offsetParent === null)，代表當前在積木模式
+        if (logger) logger(`[Debug] 啟動智慧掃描所有程式碼視窗...`);
+        let bestCode = '';
+        let bestLength = 0;
+
+        // 1. 抓取畫面上所有的 Ace Editor 實例 (可能包含隱藏的主代碼頁，以及常駐顯示在右側的預覽頁)
+        const aceEditors = document.querySelectorAll('.ace_editor');
+        aceEditors.forEach((aceEl, idx) => {
+            if (aceEl && aceEl.env && aceEl.env.editor) {
+                const code = aceEl.env.editor.getValue() || '';
+                const isVisible = aceEl.offsetParent !== null;
+                if (logger) logger(`[Debug] 找到視窗 ${idx} (可見: ${isVisible}), 長度: ${code.length}`);
+                
+                // 挑選出包含最多字元的代碼 (預防抓到尚未更新的空殼，或被廢棄的舊視窗)
+                if (code.length > bestLength) {
+                    bestLength = code.length;
+                    bestCode = code;
+                }
+            }
+        });
+
+        // 如果成功抓到合理的長度，就直接回傳，不再經過複雜的切換手續！
+        if (bestCode && bestCode.trim().length > 50) {
+            if (logger) logger(`[Debug] 智慧掃描完成，採用視窗中找到的最長代碼 (${bestLength} 字元)`);
+            return bestCode.replace(/\u00A0/g, ' ');
+        }
+
+        // --- 若以上都失敗，再使用終極保險：隱形切換分頁大法 ---
         const aceEl = document.querySelector('.ace_editor');
         const isCodeMode = aceEl && aceEl.offsetParent !== null;
 
         if (!isCodeMode) {
-            // 無法從全域拿到 generator，改用「隱形切換分頁大法」：透過模擬點擊切到代碼分頁，讓 GUI 自然生成代碼後，再切回來。
             try {
                 const ALL_TABS = document.querySelectorAll('.react-tabs__tab');
                 let codeTab = null;
@@ -431,45 +455,25 @@
                 });
 
                 if (codeTab && blocksTab) {
-                    if (logger) logger(`[Debug] 找到分頁按鈕，執行隱形切換以更新代碼...`);
-                    // 切換過去
+                    if (logger) logger(`[Debug] DOM 找不到合理代碼，啟動終極絕招：隱形切換分頁...`);
                     codeTab.click();
-                    
-                    // 等待 React 渲染以及 Ace Editor 更新
                     await new Promise(resolve => setTimeout(resolve, 80));
 
                     const currentAce = document.querySelector('.ace_editor');
                     if (currentAce && currentAce.env && currentAce.env.editor) {
                         const freshCode = currentAce.env.editor.getValue();
                         if (logger) logger(`[Debug] 切換後成功讀取，新鮮代碼長度: ${freshCode ? freshCode.length : 0}`);
-                        
-                        // 迅速切回原本的積木分頁
                         blocksTab.click();
 
                         if (freshCode && freshCode.trim().length > 0) {
-                            console.log('[Intersector] 隱形切換分頁法成功取得最新代碼');
                             return freshCode.replace(/\u00A0/g, ' ');
                         }
                     } else {
-                        // 若發生意外，確保一定要切回積木
                         blocksTab.click();
                     }
-                } else {
-                    if (logger) logger(`[Debug] DOM 中找不到符合的分頁按鈕類別`);
                 }
             } catch (err) {
-                 console.warn('[Intersector] 隱形切換分頁出錯:', err);
-                 if (logger) logger(`[Debug] Exception: ${err.message}`);
-            }
-        }
-
-        if (logger) logger(`[Debug] 退回讀取 Ace Editor (isCodeMode=${isCodeMode})`);
-        // 優先使用 Ace editor API 取得完整內容（若在代碼模式則受編輯影響）
-        // Ace editor 是虛擬化渲染，必須透過 API 才能拿到全部程式碼
-        if (aceEl && aceEl.env && aceEl.env.editor) {
-            const code = aceEl.env.editor.getValue();
-            if (code && code.trim().length > 0) {
-                return code.replace(/\u00A0/g, ' ');
+                 if (logger) logger(`[Debug] 隱形切換分頁出錯: ${err.message}`);
             }
         }
 
