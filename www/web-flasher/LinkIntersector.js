@@ -532,15 +532,76 @@
         const originalText = buttonElement.querySelector('span')?.textContent || '編譯';
         const textSpan = buttonElement.querySelector('span');
 
+        // 建立或顯示懸浮日誌視窗
+        let consoleBox = document.getElementById('tubit-compile-console');
+        let consoleText = document.getElementById('tubit-compile-text');
+        if (!consoleBox) {
+            consoleBox = document.createElement('div');
+            consoleBox.id = 'tubit-compile-console';
+            consoleBox.style.cssText = `
+                position: fixed; bottom: 20px; right: 20px; width: 450px; height: 300px;
+                background: rgba(30, 30, 30, 0.95); color: #00ff00; font-family: monospace; font-size: 13px;
+                border: 1px solid #555; border-radius: 8px; z-index: 999999;
+                display: flex; flex-direction: column; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+                backdrop-filter: blur(4px); transition: opacity 0.3s;
+            `;
+            
+            const header = document.createElement('div');
+            header.style.cssText = `
+                display: flex; justify-content: space-between; align-items: center;
+                background: #333; padding: 6px 12px; border-radius: 8px 8px 0 0;
+                font-family: sans-serif; font-size: 13px; color: #ddd; font-weight: bold;
+            `;
+            header.innerHTML = `<span>⚙️ 編譯進度</span><span id="tubit-compile-close" style="cursor: pointer; font-size: 16px;">&times;</span>`;
+            
+            consoleText = document.createElement('div');
+            consoleText.id = 'tubit-compile-text';
+            consoleText.style.cssText = `
+                flex: 1; padding: 12px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+            `;
+
+            consoleBox.appendChild(header);
+            consoleBox.appendChild(consoleText);
+            document.body.appendChild(consoleBox);
+
+            document.getElementById('tubit-compile-close').addEventListener('click', () => {
+                consoleBox.style.display = 'none';
+            });
+        }
+        
+        consoleBox.style.display = 'flex';
+        consoleBox.style.opacity = '1';
+        consoleText.innerHTML = ''; // 清空上次的紀錄
+
+        const appendLog = (msg, isError=false) => {
+            const line = document.createElement('div');
+            line.textContent = msg;
+            if (isError || msg.includes('❌') || msg.includes('失敗')) line.style.color = '#ff4d4f';
+            else if (msg.includes('✅')) line.style.color = '#52c41a';
+            else if (msg.includes('⏳')) line.style.color = '#faad14';
+            
+            consoleText.appendChild(line);
+            consoleText.scrollTop = consoleText.scrollHeight;
+        };
+
+        const hideConsole = () => {
+            if (consoleBox) {
+                consoleBox.style.opacity = '0';
+                setTimeout(() => consoleBox.style.display = 'none', 300);
+            }
+        };
+
         // GUI 訊息輸出：透過 activeFakeWs 送 uploadStdout，讓使用者在 GUI 中看到訊息
         const ws = activeFakeWs;
-        const logger = (msg) => {
+        const logger = (msg, isErr=false) => {
             console.log('[WebFlasher]', msg);
+            appendLog(msg, isErr);
             if (ws) {
+                const colorCode = isErr ? '\x1b[31m' : '\x1b[36m';
                 injectMessage(ws, {
                     jsonrpc: "2.0",
                     method: "uploadStdout",
-                    params: { message: `\x1b[36m[WebFlasher] ${msg}\n\x1b[0m` }
+                    params: { message: `${colorCode}[WebFlasher] ${msg}\n\x1b[0m` }
                 });
             }
         };
@@ -577,10 +638,11 @@
                 logger('程式碼未變更，使用快取的編譯結果 ✅');
                 if (textSpan) textSpan.textContent = '✅ 已編譯';
                 setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 2000);
+                setTimeout(() => hideConsole(), 3000);
                 return;
             }
 
-            const modeLabel = compileMode === 'local' ? '本地' : '線上';
+            const modeLabel = COMPILE_SERVER_URL.includes('localhost') ? '本地' : '雲端';
             logger(`正在發起${modeLabel}編譯 (${COMPILE_SERVER_URL})...`);
             logger(`⏳ 等待${modeLabel}編譯中，請稍候...（依程式複雜度，約需 30 秒至 2 分鐘）`);
 
@@ -602,7 +664,7 @@
                     })
                 });
             } catch (fetchErr) {
-                if (compileMode === 'local') {
+                if (COMPILE_SERVER_URL.includes('localhost')) {
                     throw new Error('無法連接本地編譯伺服器 (localhost:3000)。請確認已啟動本地編譯器。');
                 }
                 throw fetchErr;
@@ -654,6 +716,7 @@
 
             if (textSpan) textSpan.textContent = '✅ 編譯成功';
             setTimeout(() => { if (textSpan) textSpan.textContent = originalText; }, 3000);
+            setTimeout(() => hideConsole(), 5000);
 
         } catch (err) {
             console.error('[Intersector] 編譯失敗:', err);
@@ -728,9 +791,10 @@
                 artifacts = cachedArtifacts;
                 flashAddresses = cachedFlashAddresses;
             } else {
+                const modeLabel = COMPILE_SERVER_URL.includes('localhost') ? '本地' : '雲端';
                 // 沒有快取：走原本的編譯流程
-                logger(`正在發起線上編譯 (${COMPILE_SERVER_URL})...`);
-                logger(`⏳ 等待雲端編譯中，請稍候...（依程式複雜度，約需 30 秒至 2 分鐘）`);
+                logger(`正在發起${modeLabel}編譯 (${COMPILE_SERVER_URL})...`);
+                logger(`⏳ 等待${modeLabel}編譯中，請稍候...（依程式複雜度，約需 30 秒至 2 分鐘）`);
 
                 // 每 15 秒送一次提示，避免使用者誤以為當機
                 let waitSecs = 15;
