@@ -414,21 +414,40 @@
         let bestCode = '';
         let bestLength = 0;
 
-        // 1. 抓取畫面上所有的 Ace Editor 實例 (可能包含隱藏的主代碼頁，以及常駐顯示在右側的預覽頁)
+        // 1. 抓取畫面上所有的 Ace Editor 實例 (舊版相容)
         const aceEditors = document.querySelectorAll('.ace_editor');
         aceEditors.forEach((aceEl, idx) => {
             if (aceEl && aceEl.env && aceEl.env.editor) {
                 const code = aceEl.env.editor.getValue() || '';
                 const isVisible = aceEl.offsetParent !== null;
-                if (logger) logger(`[Debug] 找到視窗 ${idx} (可見: ${isVisible}), 長度: ${code.length}`);
+                if (logger) logger(`[Debug] 找到 Ace 視窗 ${idx} (可見: ${isVisible}), 長度: ${code.length}`);
                 
-                // 挑選出包含最多字元的代碼 (預防抓到尚未更新的空殼，或被廢棄的舊視窗)
                 if (code.length > bestLength) {
                     bestLength = code.length;
                     bestCode = code;
                 }
             }
         });
+
+        // 2. 抓取 Monaco Editor 實例 (OpenBlock / TubitBlockWeb 新版右側視窗所用)
+        try {
+            if (window.monaco && window.monaco.editor) {
+                const models = window.monaco.editor.getModels();
+                models.forEach((model, idx) => {
+                    const code = model.getValue() || '';
+                    if (logger) logger(`[Debug] 找到 Monaco 視窗模型 ${idx}, 長度: ${code.length}`);
+                    
+                    if (code.length > bestLength) {
+                        bestLength = code.length;
+                        bestCode = code;
+                    }
+                });
+            } else {
+                if (logger) logger(`[Debug] 未在全域找到 window.monaco 物件`);
+            }
+        } catch (e) {
+            if (logger) logger(`[Debug] 掃描 Monaco 時發生錯誤: ${e.message}`);
+        }
 
         // 如果成功抓到合理的長度，就直接回傳，不再經過複雜的切換手續！
         if (bestCode && bestCode.trim().length > 50) {
