@@ -575,10 +575,13 @@
 
         const appendLog = (msg, isError=false) => {
             const line = document.createElement('div');
-            line.textContent = msg;
-            if (isError || msg.includes('❌') || msg.includes('失敗')) line.style.color = '#ff4d4f';
-            else if (msg.includes('✅')) line.style.color = '#52c41a';
-            else if (msg.includes('⏳')) line.style.color = '#faad14';
+            // 濾除 arduino-cli stdout 中的 ANSI escape codes (例如 \x1B[92m) 以免在純文字 div 中顯示亂碼
+            const cleanMsg = msg.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+            line.textContent = cleanMsg;
+            
+            if (isError || cleanMsg.includes('❌') || cleanMsg.includes('失敗')) line.style.color = '#ff4d4f';
+            else if (cleanMsg.includes('✅')) line.style.color = '#52c41a';
+            else if (cleanMsg.includes('⏳')) line.style.color = '#faad14';
             
             consoleText.appendChild(line);
             consoleText.scrollTop = consoleText.scrollHeight;

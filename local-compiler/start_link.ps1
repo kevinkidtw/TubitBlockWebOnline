@@ -52,7 +52,12 @@ if (-not $npmPath) {
         winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
     } else {
         $msiPath = Join-Path $env:TEMP "nodejs_setup.msi"
-        Receive-FileSimple -Url "https://nodejs.org/dist/v20.11.1/node-v20.11.1-x64.msi" -OutFile $msiPath -DisplayName "Node.js LTS"
+        if ($osArch -eq "ARM64") {
+            $nodeMsiUrl = "https://nodejs.org/dist/v20.11.1/node-v20.11.1-arm64.msi"
+        } else {
+            $nodeMsiUrl = "https://nodejs.org/dist/v20.11.1/node-v20.11.1-x64.msi"
+        }
+        Receive-FileSimple -Url $nodeMsiUrl -OutFile $msiPath -DisplayName "Node.js LTS"
         Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qb" -Wait
         Remove-Item $msiPath -ErrorAction SilentlyContinue
     }
@@ -140,8 +145,14 @@ if ($globalCli) {
         $cliZip = Join-Path $env:TEMP "arduino-cli_$(Get-Random).zip"
         $cliTemp = Join-Path $env:TEMP "arduino-cli_extract_$(Get-Random)"
 
+        if ($osArch -eq "ARM64") {
+            $cliUrl = "https://github.com/arduino/arduino-cli/releases/download/v0.35.3/arduino-cli_0.35.3_Windows_ARM64.zip"
+        } else {
+            $cliUrl = "https://github.com/arduino/arduino-cli/releases/download/v0.35.3/arduino-cli_0.35.3_Windows_64bit.zip"
+        }
+
         Receive-FileSimple `
-            -Url "https://github.com/arduino/arduino-cli/releases/download/v0.35.3/arduino-cli_0.35.3_Windows_64bit.zip" `
+            -Url $cliUrl `
             -OutFile $cliZip `
             -DisplayName "arduino-cli"
 
