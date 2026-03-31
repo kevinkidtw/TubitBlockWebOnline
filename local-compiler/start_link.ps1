@@ -117,7 +117,11 @@ if ((Test-Path (Join-Path $parentCompilerDir "server.js")) -and (Test-Path (Join
         -DisplayName "TubitBlockWeb compiler-server"
 
     New-Item -ItemType Directory -Path $repoExtract -Force | Out-Null
+    Write-Host "    正在解壓縮..." -ForegroundColor DarkGray
+    $ProgressPreference = 'SilentlyContinue'
     Expand-Archive -Path $repoZip -DestinationPath $repoExtract -Force
+    $ProgressPreference = 'Continue'
+    Write-Host "    解壓縮完成" -ForegroundColor DarkGray
     Remove-Item $repoZip -Force -ErrorAction SilentlyContinue
 
     $srcDir = Join-Path $repoExtract "TubitBlockWebOnline-main\compiler-server"
