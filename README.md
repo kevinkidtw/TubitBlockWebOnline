@@ -74,16 +74,22 @@ http://<伺服器IP>:8080/www/index.html
 
 ### 步驟 5：編譯並燒錄
 
-點擊右上角的「**上傳**」按鈕（▶ 圖示）：
+畫面上方有一排按鈕，可選擇編譯方式：
 
-- 系統會自動將積木轉換為 Arduino C++ 程式碼
-- 傳送至雲端編譯伺服器進行編譯（約 10~30 秒）
-- 編譯完成後，透過 Web Serial API 直接燒錄至 TuBit MTC v2
-- 燒錄成功後，板子會自動重啟並執行新程式
+- **「🌐 線上」／「💻 本地」切換按鈕**：選擇要使用雲端還是教室電腦的本地編譯伺服器。一般情況下選「🌐 線上」即可；若老師已在教室電腦啟動本地編譯伺服器，才需切換至「💻 本地」。
+- **「編譯」按鈕**：只編譯、不燒錄，方便先確認程式是否有錯誤。編譯進度會在螢幕上彈出浮動視窗即時顯示。
+- **「上傳」按鈕（▶ 圖示）**：編譯後自動燒錄至開發板。
+
+點擊「**上傳**」後的流程：
+
+1. 系統將積木轉換為 Arduino C++ 程式碼
+2. 傳送至編譯伺服器進行編譯（約 10~30 秒）
+3. 編譯完成後，透過 Web Serial API 直接燒錄至 TuBit MTC v2
+4. 燒錄成功後，板子會自動重啟並執行新程式
 
 燒錄進度可在畫面下方的訊息視窗中即時查看。
 
-> **提示：** 若想先確認程式是否可以正確編譯（不燒錄），可點擊「**編譯 (線上)**」按鈕（藍色按鈕，位於「上傳」按鈕左側）。成功後系統會快取編譯結果，下次點擊「上傳」時可直接跳過編譯步驟，加速燒錄流程。
+> **提示：** 先點擊「編譯」確認程式無誤後，系統會快取這次的編譯結果，再點「上傳」時可直接跳過編譯步驟，燒錄速度更快。
 
 ---
 
@@ -97,23 +103,25 @@ http://<伺服器IP>:8080/www/index.html
 │       │  積木 → Arduino C++ 程式碼                        │
 │       ▼                                                  │
 │  LinkIntersector.js（WebSocket 攔截器）                   │
-│       │  HTTPS POST /compile                             │
+│       │  選擇編譯目標（線上 / 本地）                        │
 │       │                                                  │
 └───────┼──────────────────────────────────────────────────┘
         │
-        │  網際網路 / 區域網路
-        ▼
-┌─────────────────────────────────────────────────────────┐
-│  雲端編譯伺服器（Synology NAS / Docker）                  │
-│                                                          │
-│  server.js (Node.js + Express)                           │
-│       │  呼叫 arduino-cli 編譯                            │
-│       │  回傳 .bin 檔案（Base64）+ 燒錄地址               │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
-        │
-        │  編譯結果回傳瀏覽器
-        ▼
+        ├─────────────────────────────────────┐
+        │ 線上模式（HTTPS）                    │ 本地模式（HTTP）
+        ▼                                     ▼
+┌────────────────────────┐   ┌────────────────────────────┐
+│  雲端編譯伺服器         │   │  教室電腦本地編譯伺服器      │
+│  （Synology NAS/Docker）│   │  （start_link.bat / .sh）   │
+│                        │   │                            │
+│  server.js             │   │  server.js                 │
+│  arduino-cli 編譯       │   │  arduino-cli 編譯           │
+│  回傳 .bin + 燒錄地址   │   │  回傳 .bin + 燒錄地址       │
+└────────────────────────┘   └────────────────────────────┘
+        │                                     │
+        └──────────────┬──────────────────────┘
+                       │ 編譯結果回傳瀏覽器
+                       ▼
 ┌─────────────────────────────────────────────────────────┐
 │  學生電腦（瀏覽器）                                        │
 │                                                          │
@@ -297,7 +305,35 @@ http://localhost:8080/www/index.html
 
 若學校需要自行建置編譯伺服器（例如：不使用目前的 NAS、建立校內區域網路版本），請依以下步驟操作。
 
-### 方案 A：Docker 部署（推薦）
+### 方案 A：一鍵啟動腳本（最簡單，推薦教室使用）
+
+適用於想在**教室電腦**直接執行本地編譯伺服器的情境，無需 Docker、無需額外設定。腳本會自動安裝所有必要工具（Node.js、arduino-cli、ESP32 核心），完成後在背景啟動伺服器，學生在瀏覽器切換至「💻 本地」模式即可使用。
+
+**Windows 電腦：**
+
+1. 下載 `local-compiler/start_link.bat`
+2. 雙擊執行，腳本會自動下載並執行最新版 PowerShell 腳本
+3. 安裝完成後，終端機顯示「伺服器已啟動於 http://localhost:3000」即可
+
+> **注意（Windows）：** 執行時系統可能出現「已封鎖不明的應用程式」警告，請點擊「仍要執行」。腳本首次執行需要網路下載工具（約 5~10 分鐘）；之後再次執行則秒速啟動。
+
+**macOS / Linux 電腦：**
+
+```bash
+# 在終端機執行
+bash local-compiler/start_link.sh
+```
+
+**工具鏈安裝位置：**
+
+| 平台 | 安裝路徑 |
+|------|---------|
+| Windows | `C:\TubitBlock\`（固定 ASCII 路徑，避免中文帳號問題）|
+| macOS / Linux | `~/.tubitblock/` |
+
+每次啟動腳本都會自動從 GitHub 拉取最新版 `server.js`，確保修復同步生效，不需要手動更新。
+
+### 方案 B：Docker 部署（適合伺服器長期運行）
 
 適用於任何支援 Docker 的機器（NAS、伺服器、PC）。
 
@@ -336,12 +372,12 @@ curl http://localhost:3000/
 </script>
 ```
 
-### 方案 B：直接以 Node.js 運行（無 Docker）
+### 方案 C：直接以 Node.js 運行（無 Docker）
 
 適用於已安裝 Node.js 與 arduino-cli 的本機環境。
 
 **前置需求：**
-- Node.js 18+
+- Node.js 20+
 - arduino-cli 0.35+（已安裝 esp32:esp32@3.1.3 核心）
 
 ```bash
@@ -399,6 +435,10 @@ node server.js
 }
 ```
 
+#### `GET /boards`
+
+列出伺服器上已安裝的所有開發板核心，可用來確認目標板型是否已安裝。
+
 ---
 
 ## 八、自訂硬體與函式庫
@@ -442,15 +482,20 @@ TubitBlockWeb線上編譯版/
 │   ├── electron-shim.js        # Electron API 瀏覽器替代實作
 │   ├── external-resources/     # 設備定義、擴充套件、靜態資源
 │   └── web-flasher/            # 燒錄相關模組
-│       ├── LinkIntersector.js  # WebSocket 攔截器 + 雲端編譯整合
+│       ├── LinkIntersector.js  # WebSocket 攔截器 + 雲端/本地編譯整合
 │       ├── Esp32WebFlasher.js  # ESP32 燒錄器（esptool-js 封裝）
 │       └── SerialManager.js    # Web Serial API 管理
 │
-├── compiler-server/            # 雲端編譯伺服器
+├── compiler-server/            # 編譯伺服器核心（雲端與本地共用）
 │   ├── server.js               # Express API 主程式
 │   ├── Dockerfile              # Docker 容器定義
 │   ├── package.json            # Node.js 相依套件
-│   └── custom_libraries/       # 預先整合至 Docker 的 Arduino 函式庫
+│   └── custom_libraries/       # 預先整合的 Arduino 函式庫
+│
+├── local-compiler/             # 本地編譯器一鍵啟動腳本
+│   ├── start_link.bat          # Windows 版（自動下載並執行 .ps1）
+│   ├── start_link.ps1          # Windows PowerShell 安裝與啟動腳本
+│   └── start_link.sh           # macOS / Linux 安裝與啟動腳本
 │
 ├── external-resources/         # 設備定義與擴充套件原始碼
 │   ├── devices/                # 設備清單（zh-tw.json 等）
