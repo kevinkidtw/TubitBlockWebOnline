@@ -17,6 +17,15 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Windows 使用 C:\TubitBlock 確保 ASCII 路徑，避免中文路徑導致 ESP32 toolchain wrapper crash
 if ($env:OS -eq 'Windows_NT') {
     $appDir = "C:\TubitBlock"
+    # 偵測舊版安裝路徑（%APPDATA%\TubitBlock），若存在則自動遷移至 C:\TubitBlock
+    $oldAppDir = Join-Path $env:APPDATA "TubitBlock"
+    if ((Test-Path $oldAppDir) -and -not (Test-Path (Join-Path $appDir "compiler-server"))) {
+        Write-Host "  偵測到舊版安裝路徑，正在遷移至 $appDir ..." -ForegroundColor Yellow
+        New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $oldAppDir "*") -Destination $appDir -Recurse -Force
+        Remove-Item $oldAppDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] 遷移完成，舊路徑已清除" -ForegroundColor Green
+    }
 } else {
     $appDir = Join-Path $env:HOME ".tubitblock"
 }

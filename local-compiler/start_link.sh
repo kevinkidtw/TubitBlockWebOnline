@@ -88,28 +88,34 @@ elif [ -f "$APP_COMPILER_DIR/server.js" ] && [ -d "$APP_COMPILER_DIR/custom_libr
 else
     echo "  未找到 compiler-server，正在從 GitHub 下載至 $APP_COMPILER_DIR ..."
 
-    if ! command -v git &> /dev/null; then
-        echo "  [錯誤] 需要 Git 來下載完整的 compiler-server（含 74 個函式庫）"
-        echo "  請先安裝 Git: https://git-scm.com/"
-        exit 1
-    fi
-
-    TEMP_REPO="/tmp/tubitblock-repo-$$"
-    rm -rf "$TEMP_REPO"
-    git clone --filter=blob:none --no-checkout --depth 1 \
-        https://github.com/kevinkidtw/TubitBlockWebOnline.git "$TEMP_REPO" 2>&1
-    cd "$TEMP_REPO"
-    git sparse-checkout init --cone
-    git sparse-checkout set compiler-server
-    git checkout 2>&1
+    REPO_ZIP="/tmp/tubitblock-repo-$$.zip"
+    REPO_EXTRACT="/tmp/tubitblock-extract-$$"
+    echo "    正在下載..."
+    curl -L --progress-bar -o "$REPO_ZIP" \
+        "https://github.com/kevinkidtw/TubitBlockWebOnline/archive/refs/heads/main.zip"
+    echo "    正在解壓縮..."
+    mkdir -p "$REPO_EXTRACT"
+    unzip -q "$REPO_ZIP" -d "$REPO_EXTRACT"
+    rm -f "$REPO_ZIP"
+    echo "    解壓縮完成"
 
     mkdir -p "$APP_COMPILER_DIR"
-    cp -r "$TEMP_REPO/compiler-server/"* "$APP_COMPILER_DIR/"
-    rm -rf "$TEMP_REPO"
+    cp -r "$REPO_EXTRACT/TubitBlockWebOnline-main/compiler-server/"* "$APP_COMPILER_DIR/"
+    rm -rf "$REPO_EXTRACT"
 
     COMPILER_DIR="$APP_COMPILER_DIR"
     LIB_COUNT=$(ls -d "$COMPILER_DIR/custom_libraries"/*/ 2>/dev/null | wc -l | tr -d ' ')
     echo "  [✓] 已下載 $LIB_COUNT 個自訂函式庫"
+fi
+
+# 每次啟動都從 GitHub 下載最新 server.js（只更新這一個檔案，libraries 快取保留）
+echo "  更新 server.js 至最新版本..."
+if curl -fsSL \
+    "https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/compiler-server/server.js" \
+    -o "$COMPILER_DIR/server.js" 2>/dev/null; then
+    echo "  [✓] server.js 已更新"
+else
+    echo "  [警告] server.js 更新失敗，使用本地快取版本"
 fi
 
 echo "  [✓] compiler-server 已就緒: $COMPILER_DIR"
