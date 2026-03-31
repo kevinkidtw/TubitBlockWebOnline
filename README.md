@@ -463,7 +463,28 @@ TubitBlockWeb線上編譯版/
 
 ## 十、版本更新紀錄
 
-### v1.55（目前版本）— 2026-03-30
+### v1.6（目前版本）— 2026-04-01
+
+**問題修復：**
+
+- **修復 Windows 本地編譯器中文路徑 panic（Error code 123）**：ESP32 core 3.1.x 的 Rust toolchain wrapper 使用 Win32 ANSI API 解析路徑，當使用者名稱含中文時觸發崩潰。改為將所有工具鏈（arduino-cli、compiler-server、ESP32 core data）統一安裝至 `C:\TubitBlock\`（ASCII 路徑），徹底繞過此問題。
+- **修復 Windows 本地編譯 `UploadSpeed=460800` 無效**：GUI 送來的 FQBN 含 `UploadSpeed=460800`，此值在 Windows 版 arduino-cli 的 `boards.txt` 未定義。在 `server.js` 加入平台判斷，Windows 自動替換為 `921600`，並優先從平台物件中選擇正確值。
+- **修復 `.bat` 執行時亂碼與命令解析錯誤**：繁中 Windows 以 Big5 讀取 UTF-8 無 BOM 的 `.bat`，UTF-8 中文字元的部分 byte 與換行符衝突，導致指令行被截斷合併。移除 `.bat` 中所有中文，改以 CRLF 換行。
+- **修復 `.ps1` 執行時 `MissingEndCurlyBrace` 錯誤**：同為 Big5 解析 UTF-8 的問題，部分 `}` byte 被吃掉。加入 UTF-8 BOM（`EF BB BF`）確保 PowerShell 正確以 UTF-8 讀取。
+- **修復 winget 失敗時未安裝 Node.js**：winget 存在但來源索引過期（錯誤碼 `0x8a15000f`）時，舊版直接跳過，導致 Node.js 未安裝卻顯示成功。現在啟動前先執行 `winget source update`，失敗時自動 fallback 至 MSI 直接下載。
+- **修復上傳按鈕可能燒錄舊代碼（Stale Code）**：直接點擊「上傳」而未先「編譯」時，無快取情況下會將 GUI 傳來的舊 `params` 轉寄至伺服器。現在無論哪條路徑都會先呼叫 `getCurrentCodeFromGUI()` 取得最新 DOM 代碼再編譯，`requestPort()` 仍在 User Gesture context 內執行，不影響 Web Serial 權限。
+
+**改善：**
+
+- **`.bat` 改為自動從 GitHub 下載 `.ps1` 再執行**：使用者只需下載單一 `.bat` 檔案，腳本會自動從 GitHub 拉取最新 `start_link.ps1` 至暫存目錄執行，結束後自動清除。
+- **本地編譯器 compiler-server 下載改用 ZIP**：Mac/Linux 版 `.sh` 改用 `curl` + `unzip` 下載 repo ZIP 並解壓，移除對 `git` 的依賴（原需 `git sparse-checkout`）。
+- **server.js 每次啟動自動更新**：Mac/Linux `.sh` 與 Windows `.ps1` 每次啟動時都從 GitHub 下載最新 `server.js`，確保本地快取的 libraries 不動、但修復內容即時生效。
+- **舊版安裝路徑自動遷移（Windows）**：偵測到舊版 `%APPDATA%\TubitBlock\` 存在時，自動搬移至 `C:\TubitBlock\` 並刪除舊目錄，使用者無需手動操作。
+- **解壓縮改為文字提示**：`Expand-Archive` 進度條改為簡短文字輸出，避免 Windows 終端機畫面跳動干擾。
+
+---
+
+### v1.55 — 2026-03-30
 
 **新增功能：**
 
