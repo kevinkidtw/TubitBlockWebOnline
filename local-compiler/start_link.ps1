@@ -123,6 +123,18 @@ if ((Test-Path (Join-Path $parentCompilerDir "server.js")) -and (Test-Path (Join
     $libCount = (Get-ChildItem -Path (Join-Path $compilerDir "custom_libraries") -Directory -ErrorAction SilentlyContinue).Count
     Write-Host "  [OK] 已下載 $libCount 個自訂函式庫" -ForegroundColor Green
 }
+# 每次啟動都從 GitHub 下載最新 server.js（只更新這一個檔案，libraries 快取保留）
+Write-Host "  更新 server.js 至最新版本..." -ForegroundColor DarkGray
+try {
+    Invoke-WebRequest `
+        -Uri "https://raw.githubusercontent.com/kevinkidtw/TubitBlockWebOnline/main/compiler-server/server.js" `
+        -OutFile (Join-Path $compilerDir "server.js") `
+        -UseBasicParsing
+    Write-Host "  [OK] server.js 已更新" -ForegroundColor Green
+} catch {
+    Write-Host "  [警告] server.js 更新失敗，使用本地快取版本" -ForegroundColor Yellow
+}
+
 Write-Host "  [OK] compiler-server 已就緒: $compilerDir" -ForegroundColor Green
 
 # ---- 第三步：安裝 arduino-cli + ESP32 核心 ----
