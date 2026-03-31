@@ -51,6 +51,8 @@ if (-not $npmPath) {
     $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
     if ($wingetPath) {
         Write-Host "  嘗試使用 winget 安裝 Node.js..." -ForegroundColor Cyan
+        Write-Host "  更新 winget 來源索引..." -ForegroundColor DarkGray
+        winget source update 2>&1 | Out-Null
         winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -eq 0) { $wingetOk = $true }
         else { Write-Host "  winget 失敗 (exit $LASTEXITCODE)，改用直接下載..." -ForegroundColor Yellow }
