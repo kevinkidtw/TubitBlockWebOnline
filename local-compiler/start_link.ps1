@@ -47,10 +47,15 @@ $npmPath = Get-Command npm -ErrorAction SilentlyContinue
 if (-not $npmPath) {
     Write-Host "  找不到 Node.js，正在自動安裝..." -ForegroundColor Red
 
+    $wingetOk = $false
     $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
     if ($wingetPath) {
+        Write-Host "  嘗試使用 winget 安裝 Node.js..." -ForegroundColor Cyan
         winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
-    } else {
+        if ($LASTEXITCODE -eq 0) { $wingetOk = $true }
+        else { Write-Host "  winget 失敗 (exit $LASTEXITCODE)，改用直接下載..." -ForegroundColor Yellow }
+    }
+    if (-not $wingetOk) {
         $msiPath = Join-Path $env:TEMP "nodejs_setup.msi"
         if ($osArch -eq "ARM64") {
             $nodeMsiUrl = "https://nodejs.org/dist/v20.11.1/node-v20.11.1-arm64.msi"
