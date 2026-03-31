@@ -172,7 +172,13 @@ app.post('/compile', async (req, res) => {
     }
 
     const buildId = uuidv4();
-    const tmpDir = path.join(os.tmpdir(), 'tubitblock-compile', buildId);
+    // Windows：os.tmpdir() 可能含中文路徑（如 C:\Users\教師\...），
+    // 導致 esp32 core 3.1.x 的 Rust toolchain wrapper 以 ANSI API 解析時 panic（Error code 123）。
+    // 固定使用 ASCII 路徑 C:\TubitBlock\build\ 完全繞過此問題。
+    const buildRoot = process.platform === 'win32'
+        ? 'C:\\TubitBlock\\build'
+        : path.join(os.tmpdir(), 'tubitblock-compile');
+    const tmpDir = path.join(buildRoot, buildId);
     const sketchDir = path.join(tmpDir, 'sketch');
     const buildDir = path.join(tmpDir, 'build');
 

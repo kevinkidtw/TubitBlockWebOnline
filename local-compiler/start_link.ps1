@@ -3,7 +3,8 @@
 # 功能：自動安裝 Node.js 與 arduino-cli，安裝 ESP32 核心，
 #       啟動 compiler-server 在 localhost:3000。
 #
-# 所有工具鏈統一安裝至固定目錄 %APPDATA%\TubitBlock\，與腳本位置無關。
+# 所有工具鏈統一安裝至固定目錄 C:\TubitBlock\（Windows）或 ~/.tubitblock（Mac/Linux）。
+# 使用 C:\ 根目錄以確保路徑全為 ASCII，避免中文使用者名稱導致 arduino-cli toolchain panic。
 # =====================================================================
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +14,12 @@ $osArch = $env:PROCESSOR_ARCHITECTURE
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # 固定 app 資料目錄（與腳本位置無關）
-$appDir = Join-Path $env:APPDATA "TubitBlock"
+# Windows 使用 C:\TubitBlock 確保 ASCII 路徑，避免中文路徑導致 ESP32 toolchain wrapper crash
+if ($env:OS -eq 'Windows_NT') {
+    $appDir = "C:\TubitBlock"
+} else {
+    $appDir = Join-Path $env:HOME ".tubitblock"
+}
 New-Item -ItemType Directory -Path $appDir -Force | Out-Null
 
 Write-Host ""
@@ -183,6 +189,19 @@ if ($globalCli) {
         $arduinoCliBin = $appCliBin
         Write-Host "  [OK] arduino-cli 已下載至 $appDir" -ForegroundColor Green
     }
+}
+
+# Windows 上強制設定 arduino-cli 所有資料目錄到 ASCII 路徑（C:\TubitBlock\arduino-*）
+# 防止 ESP32 core 3.1.x 的 Rust toolchain wrapper 在中文路徑下 panic（Error code 123）
+if ($env:OS -eq 'Windows_NT') {
+    $arduinoDataDir      = Join-Path $appDir "arduino-data"
+    $arduinoDownloadsDir = Join-Path $appDir "arduino-downloads"
+    $arduinoUserDir      = Join-Path $appDir "arduino-user"
+    & $arduinoCliBin config set directories.data      $arduinoDataDir      | Out-Null
+    & $arduinoCliBin config set directories.downloads $arduinoDownloadsDir | Out-Null
+    & $arduinoCliBin config set directories.user      $arduinoUserDir      | Out-Null
+    $env:ARDUINO_DATA_DIR = $arduinoDataDir
+    Write-Host "  [OK] arduino-cli 資料目錄設定至 $arduinoDataDir" -ForegroundColor Green
 }
 
 # 安裝 ESP32 核心（必須是 3.1.3，預編譯函式庫僅與此版本相容）
