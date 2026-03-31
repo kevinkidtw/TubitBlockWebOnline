@@ -159,6 +159,11 @@ app.post('/compile', async (req, res) => {
         boardFqbn = boardFqbn.trim();
     }
 
+    // Windows arduino-cli 不接受 UploadSpeed=460800，強制替換為 921600
+    if (process.platform === 'win32' && typeof boardFqbn === 'string') {
+        boardFqbn = boardFqbn.replace(/UploadSpeed=460800/g, 'UploadSpeed=921600');
+    }
+
     if (!sourceCode) {
         return res.status(400).json({ success: false, error: '缺少必要參數: code (原始碼)' });
     }
