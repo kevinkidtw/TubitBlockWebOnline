@@ -125,26 +125,32 @@ app.post('/compile', async (req, res) => {
         sourceCode = Buffer.from(req.body.message, encoding).toString();
     }
     
-    // 如果 req.body.fqbn 或 req.body.config.fqbn 是物件，嘗試提取它裡面的字串值
-    if (boardFqbn && typeof boardFqbn !== 'string') {
-        boardFqbn = boardFqbn.fqbn || boardFqbn.board || Object.values(boardFqbn).find(v => typeof v === 'string') || JSON.stringify(boardFqbn);
+    // 從平台物件 {darwin:..., linux:..., win32:...} 中選出當前平台的 FQBN
+    function extractFqbn(val) {
+        if (!val) return null;
+        if (typeof val === 'string') return val;
+        // 優先用當前平台的 key，其次 linux，最後任意字串值
+        const platform = process.platform; // 'win32' | 'darwin' | 'linux'
+        if (val[platform] && typeof val[platform] === 'string') return val[platform];
+        if (val['linux']  && typeof val['linux']  === 'string') return val['linux'];
+        return Object.values(val).find(v => typeof v === 'string') || null;
     }
-    
+
+    if (boardFqbn && typeof boardFqbn !== 'string') {
+        boardFqbn = extractFqbn(boardFqbn);
+    }
+
     if (!boardFqbn && req.body.config && req.body.config.fqbn) {
         const configFqbn = req.body.config.fqbn;
-        if (typeof configFqbn === 'string') {
-            boardFqbn = configFqbn;
-        } else {
-            console.log(`[Compile] config.fqbn is an object:`, JSON.stringify(configFqbn));
-            // 嘗試找到任何字串值，或是直接預設為 esp32
-            boardFqbn = configFqbn.fqbn || configFqbn.board || Object.values(configFqbn).find(v => typeof v === 'string' && v.includes('esp32')) || 'esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default';
-            console.log(`[Compile] Extracted boardFqbn from object: ${boardFqbn}`);
-        }
+        console.log(`[Compile] config.fqbn from object:`, JSON.stringify(configFqbn));
+        boardFqbn = extractFqbn(configFqbn);
+        console.log(`[Compile] Extracted boardFqbn from object: ${boardFqbn}`);
     }
     
     // 如果真的還是沒有，因為我們現在都在燒 ESP32，先給一個預設值
     if (!boardFqbn) {
-        boardFqbn = 'esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default';
+        const uploadSpeed = process.platform === 'win32' ? '921600' : '460800';
+        boardFqbn = `esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=${uploadSpeed},LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default`;
         console.warn(`[Compile] Warning: boardFqbn missing in payload, defaulting to full esp32 FQBN. Payload was:`, JSON.stringify(req.body).slice(0, 300));
     }
     
