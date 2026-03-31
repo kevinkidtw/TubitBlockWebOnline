@@ -794,8 +794,18 @@
                 artifacts = cachedArtifacts;
                 flashAddresses = cachedFlashAddresses;
             } else {
+                // 沒有快取：取得最新代碼再編譯
+                // 注意：requestPort() 已在上方（User Gesture context 內）執行完畢，
+                // 此處的 getCurrentCodeFromGUI() 在其之後執行，不影響 Web Serial 權限。
+                const currentCode = await getCurrentCodeFromGUI(logger);
+                if (!currentCode || currentCode.trim().length < 20) {
+                    throw new Error('無法從編輯器取得程式碼。請確認已選擇裝置並切換到程式碼檢視。');
+                }
+                if (!currentCode.includes('void setup') && !currentCode.includes('void loop')) {
+                    throw new Error('程式碼不完整（找不到 void setup 或 void loop）。請切換到程式碼檢視後再試。');
+                }
+
                 const modeLabel = COMPILE_SERVER_URL.includes('localhost') ? '本地' : '雲端';
-                // 沒有快取：走原本的編譯流程
                 logger(`正在發起${modeLabel}編譯 (${COMPILE_SERVER_URL})...`);
                 logger(`⏳ 等待${modeLabel}編譯中，請稍候...（依程式複雜度，約需 30 秒至 2 分鐘）`);
 
@@ -808,10 +818,13 @@
 
                 let response;
                 try {
-                    // 嘗試兩種請求格式：先用 GUI 原生的 params，再用簡潔版
+                    // 使用從 DOM 取得的最新代碼，而非直接轉寄 GUI 傳來的 params（避免燒錄舊代碼）
                     response = await fetch(COMPILE_SERVER_URL, {
                         method: 'POST',
-                        body: JSON.stringify(params),
+                        body: JSON.stringify({
+                            ...params,
+                            code: currentCode
+                        }),
                         headers: { 'Content-Type': 'application/json' }
                     });
                 } finally {
