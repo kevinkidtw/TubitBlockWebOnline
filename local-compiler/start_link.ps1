@@ -101,26 +101,21 @@ if ((Test-Path (Join-Path $parentCompilerDir "server.js")) -and (Test-Path (Join
 } else {
     Write-Host "  未找到 compiler-server，正在從 GitHub 下載至 $appCompilerDir ..." -ForegroundColor Cyan
 
-    $gitPath = Get-Command git -ErrorAction SilentlyContinue
-    if (-not $gitPath) {
-        Write-Host "  [錯誤] 需要 Git 來下載完整的 compiler-server（含 74 個函式庫）" -ForegroundColor Red
-        Write-Host "  請先安裝 Git: https://git-scm.com/" -ForegroundColor Red
-        pause
-        exit 1
-    }
+    $repoZip = Join-Path $env:TEMP "tubitblock-repo-$(Get-Random).zip"
+    $repoExtract = Join-Path $env:TEMP "tubitblock-extract-$(Get-Random)"
+    Receive-FileSimple `
+        -Url "https://github.com/kevinkidtw/TubitBlockWebOnline/archive/refs/heads/main.zip" `
+        -OutFile $repoZip `
+        -DisplayName "TubitBlockWeb compiler-server"
 
-    $tempRepo = Join-Path $env:TEMP "tubitblock-repo-$(Get-Random)"
-    git clone --filter=blob:none --no-checkout --depth 1 `
-        "https://github.com/kevinkidtw/TubitBlockWebOnline.git" $tempRepo 2>&1
-    Push-Location $tempRepo
-    git sparse-checkout init --cone
-    git sparse-checkout set compiler-server
-    git checkout 2>&1
-    Pop-Location
+    New-Item -ItemType Directory -Path $repoExtract -Force | Out-Null
+    Expand-Archive -Path $repoZip -DestinationPath $repoExtract -Force
+    Remove-Item $repoZip -Force -ErrorAction SilentlyContinue
 
+    $srcDir = Join-Path $repoExtract "TubitBlockWebOnline-main\compiler-server"
     New-Item -ItemType Directory -Path $appCompilerDir -Force | Out-Null
-    Copy-Item -Path (Join-Path $tempRepo "compiler-server\*") -Destination $appCompilerDir -Recurse -Force
-    Remove-Item $tempRepo -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-Item -Path (Join-Path $srcDir "\*") -Destination $appCompilerDir -Recurse -Force
+    Remove-Item $repoExtract -Recurse -Force -ErrorAction SilentlyContinue
 
     $compilerDir = $appCompilerDir
     $libCount = (Get-ChildItem -Path (Join-Path $compilerDir "custom_libraries") -Directory -ErrorAction SilentlyContinue).Count
