@@ -390,6 +390,224 @@ node server.js
 # 伺服器預設監聽 port 3000
 ```
 
+### 方案 D：GitHub Actions（免維護雲端，適合低預算）
+
+利用 GitHub Actions Runner 執行 arduino-cli 編譯，不需任何自架伺服器。
+
+**架構流程：**
+
+```
+瀏覽器（積木編輯器）
+    │
+    │  POST /compile（帶上 .ino 原始碼）
+    ▼
+中介 API（Cloudflare Worker / Vercel Edge Function）
+    │  GitHub REST API: workflow_dispatch
+    ▼
+GitHub Actions Runner（免費 ubuntu-latest）
+    │  arduino-cli 編譯，上傳 artifacts
+    ▼
+中介 API 輪詢 artifacts 並回傳
+    │
+    ▼
+瀏覽器下載 .bin，Web Serial 燒錄
+```
+
+**步驟 1：建立 Workflow 檔案**
+
+在 repo 新增 `.github/workflows/compile.yml`：
+
+```yaml
+name: Compile ESP32
+
+on:
+  workflow_dispatch:
+    inputs:
+      sketch_b64:
+        description: 'Base64 encoded sketch.ino'
+        required: true
+      job_id:
+        description: 'Unique job ID'
+        required: true
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache arduino-cli data
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-esp32-3.1.3
+
+      - name: Decode sketch
+        run: |
+          mkdir -p sketch
+          echo "${{ inputs.sketch_b64 }}" | base64 -d > sketch/sketch.ino
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Install ESP32 core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls \
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.1.3
+
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32 \
+            --build-path ./build \
+            --libraries ./compiler-server/custom_libraries \
+            ./sketch
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ inputs.job_id }}
+          path: build/*.bin
+          retention-days: 1
+```
+
+**步驟 2：中介 API（觸發 + 輪詢）**
+
+```javascript
+// POST /compile  →  觸發 GitHub Actions
+export async function handleCompile(request) {
+  const { code } = await request.json();
+  const jobId = crypto.randomUUID();
+
+  await fetch(
+    `https://api.github.com/repos/OWNER/REPO/actions/workflows/compile.yml/dispatches`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ref: 'main', inputs: { sketch_b64: btoa(code), job_id: jobId } }),
+    }
+  );
+  return Response.json({ jobId });
+}
+```
+
+**步驟 3：前端輪詢（修改 LinkIntersector.js）**
+
+```javascript
+async function compileWithGitHubActions(code) {
+  const { jobId } = await fetch('/api/compile', {
+    method: 'POST', body: JSON.stringify({ code }),
+  }).then(r => r.json());
+
+  // 每 5 秒輪詢，最多等 5 分鐘
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const status = await fetch(`/api/status/${jobId}`).then(r => r.json());
+    if (status.state === 'completed') return status.downloadUrls;
+    if (status.state === 'failed') throw new Error('Compile failed');
+  }
+}
+```
+
+**優缺點比較：**
+
+| 項目 | NAS Docker（現行）| GitHub Actions |
+|------|-----------------|---------------|
+| 費用 | NAS 電費 | 免費（public repo 無限；private repo 2000 min/月）|
+| 速度 | ~30 秒 | **3–8 分鐘**（含 runner 啟動）|
+| 速度（有快取）| ~15 秒 | ~1–2 分鐘 |
+| 可靠性 | 依賴家用網路 | GitHub 基礎設施 |
+| 維護量 | 需管理 Docker | 零維護 |
+| 最大併發 | 受 NAS 限制 | 多 runner 並行 |
+
+> **建議：** 若主要考量是零維護且可接受較長等待時間，選 GitHub Actions；若需要速度接近現行水準，建議改用 Railway / Render / Fly.io 部署 `compiler-server`。
+
+---
+
+### 大規模部署：高併發 NAS 硬體規格建議
+
+當需要支援教室或學校規模（同時 100 個以上的編譯請求）時，可參考以下規格。
+
+**單次 arduino-cli 編譯的資源消耗：**
+
+| 資源 | 消耗量 |
+|------|--------|
+| CPU | 1–2 cores 峰值（xtensa-esp32-elf-gcc 多進程）|
+| RAM | ~300–500 MB（compiler process + node subprocess）|
+| Disk I/O | 讀取 headers + 寫入 .o 物件，約 50–200 MB temp |
+| 時間 | 冷編譯 60–90 秒；有 build cache 約 15–30 秒 |
+
+**情境一：真正同時 100 個（無佇列）**
+
+| 資源 | 計算 | 最低規格 |
+|------|------|---------|
+| CPU | 100 × 1.5 cores | 64 cores |
+| RAM | 100 × 400 MB + OS | 64 GB |
+| Disk | 100 × 150 MB temp | NVMe 500 GB+ |
+
+**情境二：佇列制（推薦，最大併發 = 20）**
+
+| 資源 | 計算 | 最低規格 |
+|------|------|---------|
+| CPU | 20 × 1.5 cores | 16–32 cores |
+| RAM | 20 × 400 MB + OS | 16–32 GB |
+| Disk | 20 × 150 MB temp | NVMe 200 GB |
+
+**推薦實用配置：**
+
+| 等級 | CPU | RAM | 儲存 | 估計吞吐（30 秒/編譯）|
+|------|-----|-----|------|----------------------|
+| 最低可用 | Intel Core i7-13700（16 核）| 32 GB DDR5 | NVMe 500 GB | 100 請求約 3 分鐘完成 |
+| 舒適配置 | AMD Ryzen Threadripper 3960X（24 核）| 64 GB ECC DDR4 | NVMe 1 TB | 100 請求約 1.5 分鐘完成 |
+
+**關鍵優化：將 build temp 掛載為 tmpfs（RAM Disk）**
+
+arduino-cli 編譯時大量讀寫小檔案（`.h`、`.o`），這是最主要的瓶頸。改用 tmpfs 可讓編譯速度提升 2–3 倍：
+
+```bash
+# 開機後執行一次（分配 20 GB RAM 給 build temp）
+sudo mount -t tmpfs -o size=20G tmpfs /tmp/arduino-builds/
+```
+
+並在 `server.js` 將編譯目錄指向此路徑：
+
+```javascript
+const buildPath = process.platform === 'linux'
+  ? `/tmp/arduino-builds/${buildId}`
+  : path.join(os.tmpdir(), buildId);
+```
+
+**server.js 加入佇列限制（支援高併發的必要修改）：**
+
+```bash
+cd compiler-server/
+npm install p-queue
+```
+
+```javascript
+import PQueue from 'p-queue';
+
+// concurrency 依硬體核心數調整
+const queue = new PQueue({ concurrency: 20 });
+
+app.post('/compile', (req, res) => {
+  queue.add(async () => {
+    const result = await runArduinoCli(req.body);
+    res.json(result);
+  });
+});
+
+// 讓前端可以查詢目前佇列狀態
+app.get('/queue-status', (req, res) => {
+  res.json({ pending: queue.pending, size: queue.size });
+});
+```
+
 ### API 端點說明
 
 #### `GET /`
