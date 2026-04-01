@@ -525,13 +525,141 @@ async function compileWithGitHubActions(code) {
 | 維護量 | 需管理 Docker | 零維護 |
 | 最大併發 | 受 NAS 限制 | 多 runner 並行 |
 
-> **建議：** 若主要考量是零維護且可接受較長等待時間，選 GitHub Actions；若需要速度接近現行水準，建議改用 Railway / Render / Fly.io 部署 `compiler-server`。
+> **建議：** 若主要考量是零維護且可接受較長等待時間，選 GitHub Actions；若需要速度接近現行水準，建議改用 Railway / Render / Fly.io 部署 `compiler-server`（見方案 E）。
 
 ---
 
-### 大規模部署：高併發 NAS 硬體規格建議
+### 方案 E：第三方雲端平台（Railway / Render / Fly.io）
 
-當需要支援教室或學校規模（同時 100 個以上的編譯請求）時，可參考以下規格。
+適用於**不想自架 NAS、希望雲端託管、速度接近現行水準**的情境。三家平台均支援直接部署現有 `compiler-server/Dockerfile`，無需修改程式碼。
+
+#### 平台總覽
+
+| | Railway | Render | Fly.io |
+|---|---------|--------|--------|
+| **最低可用月費（always-on）** | $5 | $7 | ~$4–6 |
+| **免費方案** | $5 試用額度 | 有，但 15 分鐘休眠 | 無（僅試用）|
+| **Always-on 預設** | 是 | 否（需付費）| 需手動設定 |
+| **Docker 支援** | 自動偵測 | 自動偵測 | 需 `fly launch` |
+| **部署難易度** | 最簡單 | 簡單 | 需了解設定檔 |
+| **費用模式** | 月費 + 用量 | 固定月費 | 純用量 |
+| **適合此專案** | 最推薦 | 需付費才可用 | 需要設定 |
+
+---
+
+#### Railway（推薦）
+
+**費用方案：**
+
+| 方案 | 月費 | RAM 上限 | CPU 上限 |
+|------|------|---------|---------|
+| Trial | 免費（$5 試用額度，30 天）| 0.5 GB | 1 vCPU |
+| Hobby | $5 + 用量 | 48 GB | 48 vCPU |
+| Pro | $20 + 用量 | 1 TB | 1000 vCPU |
+
+用量費率：RAM $0.00000386/GB-秒、CPU $0.00000772/vCPU-秒。  
+假設每天使用 8 小時、平均同時 5 個編譯（60 秒/次），月費約 **$6–15**。
+
+**部署步驟：**
+
+1. 前往 [railway.app](https://railway.app) 並以 GitHub 帳號登入
+2. 點擊「New Project」→「Deploy from GitHub repo」
+3. 選擇此 repo，Railway 自動偵測 `compiler-server/Dockerfile`
+4. 設定根目錄為 `compiler-server/`、環境變數 `PORT=3000`
+5. 部署完成後，Railway 自動提供 HTTPS 網址
+
+**更新程式碼：** 推送至 GitHub 後 Railway 自動重新部署，無需手動操作。
+
+**冷啟動：** 預設 Always-on，無冷啟動問題。
+
+---
+
+#### Render
+
+**費用方案：**
+
+| 方案 | 月費 | RAM | vCPU | 備註 |
+|------|------|-----|------|------|
+| Free | $0 | 512 MB | 0.1 | **15 分鐘無流量即休眠，不適合** |
+| Starter | $7 | 512 MB | 0.5 | Always-on，適合輕度使用 |
+| Standard | $25 | 2 GB | 1 | 推薦單班使用 |
+| Pro | $85 | 4 GB | 2 | 多班同時使用 |
+| Pro Plus | $175 | 8 GB | 4 | 可支援約 10 個同時編譯 |
+| Pro Ultra | $450 | 32 GB | 8 | 可支援約 20 個同時編譯 |
+
+**部署步驟：**
+
+1. 前往 [render.com](https://render.com) 並連接 GitHub
+2. 點擊「New +」→「Web Service」
+3. 選擇此 repo，設定：
+   - **Root Directory**：`compiler-server`
+   - **Runtime**：`Docker`
+4. 選擇方案後點擊「Create Web Service」
+
+**冷啟動：** 免費方案休眠後喚醒需 25–60 秒，強烈建議升級至 Starter（$7）以上。
+
+---
+
+#### Fly.io
+
+**費用方案（按用量計費，以下為 always-on 月費估算）：**
+
+| 機型 | vCPU（獨享）| RAM | 月費估算 |
+|------|------------|-----|---------|
+| performance-1x | 1 | 2–8 GB | ~$31–60 |
+| performance-2x | 2 | 4–16 GB | ~$62–120 |
+| performance-4x | 4 | 8–32 GB | ~$120–200 |
+| performance-8x | 8 | 16–64 GB | ~$280–400 |
+
+額外費用：固定 IPv4 $2/月、出口流量 $0.02/GB。
+
+**部署步驟：**
+
+```bash
+# 1. 安裝 flyctl
+brew install flyctl        # macOS
+# 或至 https://fly.io/docs/hands-on/install-flyctl/ 下載
+
+# 2. 登入
+fly auth login
+
+# 3. 在 compiler-server/ 目錄初始化（自動偵測 Dockerfile）
+cd compiler-server/
+fly launch
+# 選擇地區（建議 nrt = 東京）、機型（performance-2x）
+
+# 4. 部署
+fly deploy
+```
+
+初始化後產生的 `fly.toml` 必須加入以下設定，避免自動休眠：
+
+```toml
+[http_service]
+  internal_port = 3000
+  min_machines_running = 1   # 保持常駐，避免冷啟動
+  auto_stop_machines = "off"
+```
+
+**更新程式碼：** 在 `compiler-server/` 目錄執行 `fly deploy` 即可。
+
+---
+
+#### 方案選擇建議
+
+| 使用情境 | 推薦方案 | 月費 |
+|---------|---------|------|
+| 個人測試、偶爾使用 | Railway Trial（試用完後 Hobby）| $0–5 |
+| 單一班級（5 人以下同時編譯）| Railway Hobby 或 Render Starter | $5–7 |
+| 多班級（10 人以下同時編譯）| Render Standard 或 Fly.io perf-2x | $25–62 |
+| 多班級（20 人以下同時編譯）| Fly.io perf-4x（搭配 p-queue）| ~$120 |
+| 全校規模（50–100 人）| 自架 NAS（見下方硬體規格建議）| 一次性硬體費 |
+
+> **不建議 Render 免費方案**：休眠機制會讓首次編譯額外等待 1 分鐘，嚴重影響上課體驗。
+
+---
+
+### 大規模部署：高併發硬體規格建議
 
 **單次 arduino-cli 編譯的資源消耗：**
 
@@ -541,6 +669,30 @@ async function compileWithGitHubActions(code) {
 | RAM | ~300–500 MB（compiler process + node subprocess）|
 | Disk I/O | 讀取 headers + 寫入 .o 物件，約 50–200 MB temp |
 | 時間 | 冷編譯 60–90 秒；有 build cache 約 15–30 秒 |
+
+#### 20 個同時編譯：雲端平台可行性分析
+
+20 個同時編譯需要：RAM 約 **8 GB**、CPU 約 **8–16 cores**（核心數不足時每個編譯速度會慢 2–5 倍）。
+
+| 平台與方案 | vCPU | RAM | 月費 | 20 個同時可行性 |
+|-----------|------|-----|------|---------------|
+| Railway Hobby | 依用量（最高 48）| 依用量 | $5 + 用量 | **可行**，CPU 按用量計費，輕度使用月費約 $10–15 |
+| Render Standard | 1 | 2 GB | $25 | 不可行（RAM 僅 2 GB）|
+| Render Pro | 2 | 4 GB | $85 | 不可行（RAM 不足、CPU 過少）|
+| Render Pro Plus | 4 | 8 GB | $175 | 勉強（RAM 夠，但 4 vCPU 速度慢 3–5 倍）|
+| Render Pro Ultra | 8 | 32 GB | $450 | 可行，但偏貴 |
+| Fly.io perf-4x | 4 | 8–32 GB | ~$120 | **可行**（搭配 p-queue concurrency=8）|
+| Fly.io perf-8x | 8 | 16–64 GB | ~$300 | 舒適，無明顯速度損失 |
+
+**結論：**
+- **最便宜可用（~$10–15/月）**：Railway Hobby + `p-queue concurrency=10`，CPU 用量費低
+- **最穩定可預測（~$120/月）**：Fly.io performance-4x + 8 GB RAM + `p-queue concurrency=8`
+- **Render 不划算**：同樣費用能取得的 CPU 遠少於 Railway 和 Fly.io
+- **真正同時 20 個（無排隊）**：需 $300–450/月，此時自架 NAS 更划算
+
+#### 100 個同時編譯：自架 NAS 規格建議
+
+當需要支援全校規模（同時 100 個以上）時，雲端平台費用過高，建議自架 NAS。
 
 **情境一：真正同時 100 個（無佇列）**
 
