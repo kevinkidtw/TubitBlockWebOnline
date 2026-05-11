@@ -273,36 +273,91 @@
             if (!window.serialManager) throw new Error("SerialManager not initialized");
 
             if (window.serialManager.isOpen) {
-                // 燒錄後序列埠已重新開啟，無需再次請求，直接回報連線成功
-                console.log('[Intersector] 序列埠已開啟，直接回報連線成功。');
-            } else {
-                console.log('[Intersector] 請求 Web Serial 存取權...');
-                if (!window.serialManager.port) {
-                    await window.serialManager.requestPort();
+                // 驗證現有連線是否真的有效（防止 isOpen 旗標不一致）
+                try {
+                    // 嘗試存取 port 的 readable 來驗證連線是否活著
+                    if (!window.serialManager.port || !window.serialManager.port.readable) {
+                        console.warn('[Intersector] isOpen=true 但 port 已失效，強制重連...');
+                        window.serialManager.isOpen = false; // 修正旗標
+                        // 往下走到重連邏輯
+                    } else {
+                        console.log('[Intersector] 序列埠已開啟且有效，直接回報連線成功。');
+                        // 跳到設定 callback 的部分
+                        setupCallbacksAndRespond();
+                        return;
+                    }
+                } catch (validationErr) {
+                    console.warn('[Intersector] 連線驗證失敗，強制重連...', validationErr);
+                    window.serialManager.isOpen = false;
                 }
-                await window.serialManager.open(115200);
-                console.log('[Intersector] 連線成功！');
             }
 
+            // --- 重連邏輯（全新連線 或 斷線後重連）---
+            console.log('[Intersector] 嘗試連線 Web Serial...');
+
+            // 優先嘗試 reconnect()：使用 getPorts() 自動取得已授權的 port
+            // 這個方法不需要 User Gesture，適合從 JSON-RPC dispatch chain 呼叫
+            let connected = false;
+            try {
+                connected = await window.serialManager.reconnect(115200);
+            } catch (reconnectErr) {
+                console.warn('[Intersector] reconnect() 失敗:', reconnectErr.message);
+            }
+
+            if (!connected) {
+                // reconnect() 沒有成功（沒有已授權的 port 或全部開啟失敗）
+                // 退路：嘗試 requestPort()（需要 User Gesture）
+                console.log('[Intersector] 自動重連失敗，嘗試 requestPort()...');
+                try {
+                    await window.serialManager.requestPort();
+                    await window.serialManager.open(115200);
+                } catch (requestErr) {
+                    if (requestErr.name === 'SecurityError') {
+                        throw new Error(
+                            '無法自動重新連接。請重新整理頁面後再試。\n' +
+                            '（原因：瀏覽器安全限制，需要使用者手勢才能請求串口權限）'
+                        );
+                    }
+                    throw requestErr;
+                }
+            }
+
+            console.log('[Intersector] 連線成功！');
+
+            setupCallbacksAndRespond();
+
+        } catch (e) {
+            console.error('[Intersector] 連線失敗:', e);
+            injectMessage(ws, {
+                jsonrpc: "2.0",
+                id: id,
+                error: { message: e.message }
+            });
+        }
+
+        function setupCallbacksAndRespond() {
             // 連線成功後，設定 serial data callback 以便之後 read 時轉發資料
             activeFakeWs = ws;
 
-            // 監聽 USB 斷線，主動通知 GUI
+            // 監聽 USB 斷線，主動通知 GUI，並嘗試延遲自動重連
             window.serialManager.onDisconnected = function () {
                 isSerialReading = false;
                 console.warn('[Intersector] USB 裝置已拔除，通知 GUI 斷線');
+
+                // 通知 GUI 顯示斷線狀態
                 if (activeFakeWs) {
                     injectMessage(activeFakeWs, {
                         jsonrpc: "2.0",
                         method: "peripheralUnplug",
                         params: {}
                     });
-                    activeFakeWs = null;
+                    // 注意：不再清除 activeFakeWs，保留引用供後續重連時使用
                 }
             };
 
             window.serialManager.onDataReceived = function (value) {
                 if (!isSerialReading || isUploading) return;
+                if (!activeFakeWs) return;
                 // 將 Uint8Array 轉為 base64（符合 OpenBlock Link 原始協議）
                 let binary = '';
                 for (let i = 0; i < value.length; i++) {
@@ -323,13 +378,6 @@
                 jsonrpc: "2.0",
                 id: id,
                 result: null
-            });
-        } catch (e) {
-            console.error('[Intersector] 連線失敗:', e);
-            injectMessage(ws, {
-                jsonrpc: "2.0",
-                id: id,
-                error: { message: e.message }
             });
         }
     }
@@ -381,12 +429,18 @@
         isSerialReading = false;
         activeFakeWs = null;
         if (window.serialManager) {
+            // 徹底清理所有 callback
             window.serialManager.onDataReceived = null;
+            window.serialManager.onDisconnected = null;
             if (window.serialManager.isOpen) {
-                await window.serialManager.close();
+                try {
+                    await window.serialManager.close();
+                } catch (closeErr) {
+                    console.warn('[Intersector] 關閉序列埠時發生錯誤（忽略）:', closeErr.message);
+                }
             }
         }
-        console.log('[Intersector] 序列埠已斷開');
+        console.log('[Intersector] 序列埠已斷開，所有 callback 已清除');
         if (id) {
             injectMessage(ws, {
                 jsonrpc: "2.0",
@@ -765,10 +819,18 @@
             // 由於之前的 fetch 是非同步的，等 fetch 回來後就失去了手勢上下文。
             // 解決方案：在開始編譯 (fetch) 之前，就先檢查並請求 Port 權限。
             if (!window.serialManager.isOpen || !window.serialManager.port) {
-                logger("偵測到序列埠尚未連線，正在請求存取權限...");
-                await window.serialManager.requestPort();
-                // 先用 115200 開啟（之後閃爍時會自動調整，或者是這裡直接用 460800 也可以）
-                await window.serialManager.open(115200);
+                logger("偵測到序列埠尚未連線，嘗試自動重連...");
+                let reconnected = false;
+                try {
+                    reconnected = await window.serialManager.reconnect(115200);
+                } catch (e) { /* 忽略 */ }
+
+                if (!reconnected) {
+                    logger("自動重連失敗，請求使用者選擇序列埠...");
+                    await window.serialManager.requestPort();
+                    // 先用 115200 開啟（之後閃爍時會自動調整，或者是這裡直接用 460800 也可以）
+                    await window.serialManager.open(115200);
+                }
                 logger("序列埠已就緒。");
             }
 
@@ -895,9 +957,14 @@
     async function flashESP32(artifacts, flashAddresses, logger) {
         if (!window.serialManager) throw new Error("SerialManager not initialized");
         if (!window.serialManager.isOpen || !window.serialManager.port) {
-            logger("序列埠尚未開啟，正在請求權限並連線...");
-            await window.serialManager.requestPort();
-            await window.serialManager.open(460800);
+            logger("序列埠尚未開啟，嘗試自動重連...");
+            let ok = false;
+            try { ok = await window.serialManager.reconnect(460800); } catch (e) { /* 忽略 */ }
+            if (!ok) {
+                logger("自動重連失敗，請求使用者選擇序列埠...");
+                await window.serialManager.requestPort();
+                await window.serialManager.open(460800);
+            }
         }
 
         const flasher = new window.Esp32WebFlasher(window.serialManager, logger);

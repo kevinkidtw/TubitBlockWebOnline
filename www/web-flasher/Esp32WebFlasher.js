@@ -183,12 +183,18 @@ window.Esp32WebFlasher = class {
                 this.manager.disableFlashingMode();
             }
             // 重新開啟序列埠，讓下次上傳無需按 F5
+            // 使用 reconnect() 而非直接 open()，確保能取得有效的 port
+            // （燒錄過程中 esptool-js 會自行管理 port，結束後 port 狀態可能不一致）
             try {
-                await new Promise(r => setTimeout(r, 300));
-                await this.manager.open(115200);
-                this.log("[ESP32] 序列埠已恢復，可直接再次上傳。");
+                await new Promise(r => setTimeout(r, 500));
+                const ok = await this.manager.reconnect(115200);
+                if (ok) {
+                    this.log("[ESP32] 序列埠已恢復，可直接再次上傳。");
+                } else {
+                    this.log("[ESP32] 序列埠未自動重開（下次連線時會重新請求）。");
+                }
             } catch (reopenErr) {
-                this.log("[ESP32] 序列埠未自動重開（下次上傳時會重新請求）。");
+                this.log("[ESP32] 序列埠恢復失敗（下次連線時會重新請求）。");
             }
             this.log("[ESP32] 燒錄流程結束。");
         }

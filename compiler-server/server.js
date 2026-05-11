@@ -8,7 +8,7 @@
 const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -60,7 +60,7 @@ function findBootApp0() {
 }
 
 /**
- * 遞迴收集 buildDir 中的所有 .bin/.hex/.elf 檔案。
+ * 遞迴收集 buildDir 中的 .bin/.hex 檔案（排除 merged.bin 和 .elf，避免回應過大）。
  * 防禦性地處理子目錄，避免未來 core 版本更新造成 artifact 遺漏。
  * @param {string} dir
  * @param {Object} artifacts  結果物件 { key: base64 }
@@ -73,7 +73,9 @@ function collectArtifactsRecursive(dir, artifacts, relPrefix = '') {
         const stat = fs.statSync(full);
         if (stat.isDirectory()) {
             collectArtifactsRecursive(full, artifacts, relPrefix ? `${relPrefix}/${entry}` : entry);
-        } else if (entry.endsWith('.bin') || entry.endsWith('.hex') || entry.endsWith('.elf')) {
+        } else if (entry.endsWith('.bin') || entry.endsWith('.hex')) {
+            // 排除 merged.bin（全分區合併映像，4MB+）和 .elf（偵錯用，11MB+），不需要燒錄且會讓 JSON 回應過大
+            if (entry.includes('merged') || entry.endsWith('.elf')) continue;
             const key = relPrefix ? `${relPrefix}/${entry}` : entry;
             artifacts[key] = fs.readFileSync(full).toString('base64');
             console.log(`[Compile]   artifact: ${key} (${stat.size} bytes)`);
@@ -86,6 +88,106 @@ const PORT = process.env.PORT || 3000;
 
 // arduino-cli 路徑，Docker 環境中安裝在 /usr/local/bin
 const ARDUINO_CLI = process.env.ARDUINO_CLI_PATH || 'arduino-cli';
+
+// --- BLE Seed Build (暖機) 設定 ---
+// Docker image build 時會預先編譯一次完整的 BLE sketch，把 build 產物保存在 /arduino-ble-seed。
+// 如果該目錄存在，每次編譯前先 cp 到本次的 buildDir，arduino-cli 就只需重新編譯 sketch.ino，
+// 其餘大型 library 的 .o 直接重用，速度從 ~90s 降到 ~15s。
+const BLE_SEED_DIR = '/arduino-ble-seed';
+let bleSeedAvailable = fs.existsSync(BLE_SEED_DIR) &&
+    fs.readdirSync(BLE_SEED_DIR).length > 0;
+if (bleSeedAvailable) {
+    console.log(`[Boot] ✅ BLE seed build 已偵測到: ${BLE_SEED_DIR}`);
+} else {
+    console.log(`[Boot] ⚠️ BLE seed build 不存在 (${BLE_SEED_DIR})，首次 BLE 編譯將較慢`);
+}
+
+// --- 靜態產物快取 ---
+// bootloader、partitions、boot_app0.bin 在 FQBN 不變的情況下每次都一樣，
+// 不需要每次編譯後重新收集。在首次成功編譯後快取起來。
+let staticArtifactCache = null;  // { artifacts: {name: base64}, flashAddresses: {name: addr} }
+
+/**
+ * 從 seed build 或首次成功 build 中提取不會變的靜態產物（bootloader, partitions, boot_app0）。
+ * @param {string} buildDir 編譯輸出目錄
+ * @returns {{artifacts: Object, flashAddresses: Object} | null}
+ */
+function extractStaticArtifacts(buildDir) {
+    const staticFiles = {};
+    const staticAddresses = {};
+
+    if (!fs.existsSync(buildDir)) return null;
+
+    // 遞迴搜尋 buildDir 中的靜態檔案
+    function scan(dir, prefix) {
+        if (!fs.existsSync(dir)) return;
+        for (const entry of fs.readdirSync(dir)) {
+            const full = path.join(dir, entry);
+            const stat = fs.statSync(full);
+            if (stat.isDirectory()) {
+                scan(full, prefix ? `${prefix}/${entry}` : entry);
+            } else if (entry.endsWith('.bin')) {
+                const key = prefix ? `${prefix}/${entry}` : entry;
+                if (entry.includes('bootloader')) {
+                    staticFiles[key] = fs.readFileSync(full).toString('base64');
+                    staticAddresses[key] = 0x1000;
+                    console.log(`[Cache] 快取靜態產物: ${key} (${stat.size} bytes) → 0x1000`);
+                } else if (entry.includes('partitions')) {
+                    staticFiles[key] = fs.readFileSync(full).toString('base64');
+                    staticAddresses[key] = 0x8000;
+                    console.log(`[Cache] 快取靜態產物: ${key} (${stat.size} bytes) → 0x8000`);
+                }
+            }
+        }
+    }
+    scan(buildDir, '');
+
+    // boot_app0.bin（不在 build 目錄中，從 ESP32 core 讀取）
+    const bootApp0Path = findBootApp0();
+    if (bootApp0Path) {
+        staticFiles['boot_app0.bin'] = fs.readFileSync(bootApp0Path).toString('base64');
+        staticAddresses['boot_app0.bin'] = 0xe000;
+        console.log(`[Cache] 快取靜態產物: boot_app0.bin (${fs.statSync(bootApp0Path).size} bytes) → 0xe000`);
+    }
+
+    if (Object.keys(staticFiles).length > 0) {
+        return { artifacts: staticFiles, flashAddresses: staticAddresses };
+    }
+    return null;
+}
+
+// 嘗試從 seed build 中預先提取靜態產物
+if (bleSeedAvailable) {
+    staticArtifactCache = extractStaticArtifacts(BLE_SEED_DIR);
+    if (staticArtifactCache) {
+        console.log(`[Boot] ✅ 已從 seed build 預先快取 ${Object.keys(staticArtifactCache.artifacts).length} 個靜態產物`);
+    }
+}
+
+/**
+ * 將 seed build 目錄複製到目標 buildDir，實現增量編譯。
+ * 使用系統 cp 指令以獲得最佳效能（避免 Node.js 逐檔複製的開銷）。
+ * @param {string} targetBuildDir 目標 build 目錄
+ * @returns {boolean} 是否成功複製
+ */
+function copySeedBuild(targetBuildDir) {
+    if (!bleSeedAvailable) return false;
+    try {
+        const start = Date.now();
+        if (process.platform === 'win32') {
+            execSync(`xcopy /E /I /Q /Y "${BLE_SEED_DIR}" "${targetBuildDir}"`, { stdio: 'ignore' });
+        } else {
+            // cp -a 保留 timestamp（讓 arduino-cli 的增量編譯判斷生效）
+            execSync(`cp -a "${BLE_SEED_DIR}/." "${targetBuildDir}/"`, { stdio: 'ignore' });
+        }
+        const elapsed = Date.now() - start;
+        console.log(`[Compile] ✅ Seed build 已複製到 buildDir (${elapsed}ms)`);
+        return true;
+    } catch (e) {
+        console.warn(`[Compile] ⚠️ 複製 seed build 失敗: ${e.message}`);
+        return false;
+    }
+}
 
 // --- Middleware ---
 app.use(cors());
@@ -185,11 +287,19 @@ app.post('/compile', async (req, res) => {
     console.log(`[Compile] Build ${buildId} started for board: ${boardFqbn}`);
     console.log(`[Compile] Code length: ${sourceCode.length} chars`);
     console.log(`[Compile] Code preview: ${sourceCode.slice(0, 300).replace(/\n/g, '\\n')}`);
-    console.log(`[Compile] Full code:\n${sourceCode}`);
 
     try {
         fs.mkdirSync(sketchDir, { recursive: true });
         fs.mkdirSync(buildDir, { recursive: true });
+
+        // === 暖機加速：複製 seed build 到本次的 buildDir ===
+        // 如果有 BLE seed build，先將預編譯好的 .o 檔案複製過來，
+        // 讓 arduino-cli 進行增量編譯（只重編 sketch.ino，跳過已編譯的 library）
+        const isEsp32 = boardFqbn.toLowerCase().includes('esp32');
+        let seedUsed = false;
+        if (isEsp32) {
+            seedUsed = copySeedBuild(buildDir);
+        }
 
         // TubitBlock 產生的程式碼有時會把 #include 放在 setup()/loop() 之後，
         // 這在 C++ 中是非法的。將所有 #include 行提到最頂端。
@@ -237,13 +347,16 @@ app.post('/compile', async (req, res) => {
             console.log(`[Compile] 自動載入自訂函式庫: ${customLibDir}`);
         }
         // 所有路徑加雙引號，防止路徑含空白（Windows 使用者名稱可能含空白）
-        const cmd = `"${ARDUINO_CLI}" compile --fqbn "${boardFqbn}" ${librariesFlag} --build-path "${buildDir}" "${sketchDir}" 2>&1`;
+        const buildCacheDir = fs.existsSync('/arduino-cache') ? '/arduino-cache'
+            : path.join(require('os').tmpdir(), 'arduino-build-cache');
+        const cmd = `"${ARDUINO_CLI}" compile --fqbn "${boardFqbn}" ${librariesFlag} --build-cache-path "${buildCacheDir}" --build-path "${buildDir}" "${sketchDir}" 2>&1`;
 
         console.log(`[Compile] Running: ${cmd}`);
+        const compileStart = Date.now();
 
         const result = await new Promise((resolve, reject) => {
             exec(cmd, {
-                timeout: 120000,
+                timeout: 300000,  // BLE 首次編譯約需 2 分鐘，設 5 分鐘留足餘量
                 maxBuffer: 10 * 1024 * 1024
             }, (error, stdout) => {
                 // 使用 2>&1 合併 stderr 到 stdout，所以只需讀 stdout
@@ -256,7 +369,8 @@ app.post('/compile', async (req, res) => {
             });
         });
 
-        console.log(`[Compile] Build ${buildId} succeeded`);
+        const compileElapsed = Date.now() - compileStart;
+        console.log(`[Compile] Build ${buildId} succeeded in ${compileElapsed}ms${seedUsed ? ' (seed-accelerated)' : ''}`);
         console.log('[Compile] output:', result.output.slice(0, 500));
 
         // 遞迴收集編譯產物 (.bin, .hex, .elf)
@@ -269,25 +383,44 @@ app.post('/compile', async (req, res) => {
             };
         }
 
-        // 建構 flashAddresses：server 端明確指定每個 artifact 的 flash 燒錄地址，
-        // 讓 client 不需依賴檔名猜測。
+        // 建構 flashAddresses：server 端明確指定每個 artifact 的 flash 燒錄地址
         const flashAddresses = {};
         const isEsp32Board = boardFqbn.toLowerCase().includes('esp32');
 
         if (isEsp32Board) {
-            for (const name of Object.keys(artifacts)) {
-                const bn = name.includes('/') ? name.split('/').pop() : name;
-                if (bn.includes('bootloader'))                      flashAddresses[name] = 0x1000;
-                else if (bn === 'boot_app0.bin')                    flashAddresses[name] = 0xe000;
-                else if (bn.includes('partitions'))                 flashAddresses[name] = 0x8000;
-                else if (bn.endsWith('.bin') && !bn.includes('merged'))  flashAddresses[name] = 0x10000;
-                // merged.bin（所有分區合併的映像）不加入 flashAddresses，讓 client 跳過
-                // .hex / .elf 不需要 flash 地址
+            // === 靜態產物快取策略 ===
+            // bootloader、partitions、boot_app0.bin 在 FQBN 不變時內容完全一樣。
+            // 如果已有快取，直接合併進去，不需要從 buildDir 重新讀取。
+            // 如果沒有快取，先從這次的 buildDir 提取並建立快取。
+            if (!staticArtifactCache) {
+                staticArtifactCache = extractStaticArtifacts(buildDir);
+                if (staticArtifactCache) {
+                    console.log(`[Cache] ✅ 首次編譯完成，已快取 ${Object.keys(staticArtifactCache.artifacts).length} 個靜態產物`);
+                }
             }
 
-            // 注入 boot_app0.bin（OTA data 分區，0xe000）
-            // 此檔案不在 arduino-cli 的 build 輸出目錄，需從 ESP32 core 讀取。
-            // 沒有它，bootloader 無法確定從哪個 factory partition 啟動應用程式。
+            // 合併靜態快取到本次 artifacts
+            if (staticArtifactCache) {
+                for (const [name, data] of Object.entries(staticArtifactCache.artifacts)) {
+                    if (!artifacts[name]) {
+                        artifacts[name] = data;
+                        console.log(`[Compile]   injected cached: ${name} → 0x${staticArtifactCache.flashAddresses[name].toString(16)}`);
+                    }
+                }
+                Object.assign(flashAddresses, staticArtifactCache.flashAddresses);
+            }
+
+            // 為非靜態產物（sketch.ino.bin 等）設定 flash 地址
+            for (const name of Object.keys(artifacts)) {
+                if (flashAddresses[name] !== undefined) continue; // 已在靜態快取中
+                const bn = name.includes('/') ? name.split('/').pop() : name;
+                if (bn.includes('bootloader'))                          flashAddresses[name] = 0x1000;
+                else if (bn === 'boot_app0.bin')                        flashAddresses[name] = 0xe000;
+                else if (bn.includes('partitions'))                     flashAddresses[name] = 0x8000;
+                else if (bn.endsWith('.bin') && !bn.includes('merged')) flashAddresses[name] = 0x10000;
+            }
+
+            // 如果靜態快取中沒有 boot_app0.bin，嘗試注入
             const hasBootApp0 = Object.keys(artifacts).some(k => {
                 const bn = k.includes('/') ? k.split('/').pop() : k;
                 return bn === 'boot_app0.bin';
@@ -345,8 +478,10 @@ app.get('/boards', async (req, res) => {
 // --- 啟動伺服器 ---
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n==============================================`);
-    console.log(`  TubitBlock Compiler Server v1.1`);
+    console.log(`  TubitBlock Compiler Server v1.2`);
     console.log(`  Listening on http://0.0.0.0:${PORT}`);
+    console.log(`  BLE Seed: ${bleSeedAvailable ? '✅ Ready' : '⚠️ Not available'}`);
+    console.log(`  Static Cache: ${staticArtifactCache ? '✅ ' + Object.keys(staticArtifactCache.artifacts).length + ' files' : '⚠️ Pending first compile'}`);
     console.log(`==============================================\n`);
 
     // 啟動時診斷
@@ -356,4 +491,57 @@ app.listen(PORT, '0.0.0.0', () => {
     exec(`${ARDUINO_CLI} core list 2>&1`, (err, stdout) => {
         console.log('[Boot] Installed cores:\n', err ? `ERROR: ${err.message}` : stdout);
     });
+
+    // --- 非 Docker 環境：嘗試自動暖機 ---
+    // 如果沒有 seed build（本機開發環境），在伺服器啟動後背景執行一次暖機編譯。
+    // 這樣第一個學生的編譯請求就能享受到增量編譯的加速。
+    if (!bleSeedAvailable) {
+        const warmupSketch = path.join(__dirname, 'ble_warmup');
+        if (fs.existsSync(path.join(warmupSketch, 'sketch.ino'))) {
+            console.log('[Boot] 🔥 啟動背景暖機編譯（本機模式）...');
+            const localSeedDir = path.join(os.tmpdir(), 'tubitblock-ble-seed');
+            const localCacheDir = path.join(os.tmpdir(), 'arduino-build-cache');
+            fs.mkdirSync(localSeedDir, { recursive: true });
+            fs.mkdirSync(localCacheDir, { recursive: true });
+
+            const customLibDir = path.join(__dirname, 'custom_libraries');
+            const libFlag = fs.existsSync(customLibDir) ? `--libraries "${customLibDir}"` : '';
+            const defaultFqbn = 'esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default';
+
+            const warmCmd = `"${ARDUINO_CLI}" compile --fqbn "${defaultFqbn}" ${libFlag} --build-cache-path "${localCacheDir}" --build-path "${localSeedDir}" "${warmupSketch}" 2>&1`;
+            console.log(`[Boot] Warmup cmd: ${warmCmd.slice(0, 200)}...`);
+
+            const warmStart = Date.now();
+            exec(warmCmd, { timeout: 600000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+                const elapsed = Math.round((Date.now() - warmStart) / 1000);
+                if (err) {
+                    console.error(`[Boot] ❌ 暖機編譯失敗 (${elapsed}s): ${(stdout || err.message).slice(0, 500)}`);
+                } else {
+                    console.log(`[Boot] ✅ 暖機編譯完成 (${elapsed}s)`);
+                    // 更新全域狀態，讓後續編譯請求可以使用 seed
+                    bleSeedAvailable = true;
+                    // 將 BLE_SEED_DIR 指向本地 seed（透過修改 copySeedBuild 的來源）
+                    // 由於 BLE_SEED_DIR 是 const，改用動態檢查
+                    try {
+                        // 建立 symlink 讓 copySeedBuild 可以找到
+                        if (!fs.existsSync(BLE_SEED_DIR)) {
+                            fs.symlinkSync(localSeedDir, BLE_SEED_DIR);
+                            console.log(`[Boot] 已建立 symlink: ${BLE_SEED_DIR} → ${localSeedDir}`);
+                        }
+                    } catch (linkErr) {
+                        // symlink 失敗（可能沒權限），直接複製
+                        console.log(`[Boot] Symlink 失敗，直接使用本地 seed: ${localSeedDir}`);
+                    }
+
+                    // 提取靜態產物快取
+                    if (!staticArtifactCache) {
+                        staticArtifactCache = extractStaticArtifacts(localSeedDir);
+                        if (staticArtifactCache) {
+                            console.log(`[Boot] ✅ 已從暖機結果快取 ${Object.keys(staticArtifactCache.artifacts).length} 個靜態產物`);
+                        }
+                    }
+                }
+            });
+        }
+    }
 });

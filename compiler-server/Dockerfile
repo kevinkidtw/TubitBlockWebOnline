@@ -45,6 +45,25 @@ RUN mkdir -p /root/Arduino/libraries
 COPY custom_libraries/ /root/Arduino/libraries/
 RUN find /root/Arduino/libraries -name "._*" -delete
 
+# --- 預先暖機 ALL TUBITV2 擴展函式庫 ---
+# 在 image build 時預先編譯包含所有 TUBITV2 擴展的 sketch：
+#   BLE(V7RC_BT), WiFi(V7RC_WIFI), PS3, MTC, DTC, OTC, ATARM, PPGUN,
+#   OLED(Adafruit_GFX + SH110X + U8g2 + eye_anim + chart_display + dot_matrix),
+#   ESP32Servo 等。
+# build 目錄保留在 /arduino-ble-seed，執行期每次編譯前 cp 到 buildDir，
+# arduino-cli 只需重新編譯 sketch.ino，其餘 library .o 直接重用。
+# 重要：warmup sketch 必須 include 所有可能用到的 library，否則對應 .o 不會被產生。
+COPY ble_warmup/ /tmp/ble-warmup/sketch/
+RUN mkdir -p /arduino-ble-seed /arduino-cache && \
+    arduino-cli compile \
+        --fqbn "esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default" \
+        --build-cache-path "/arduino-cache" \
+        --build-path "/arduino-ble-seed" \
+        --libraries "/root/Arduino/libraries" \
+        /tmp/ble-warmup/sketch && \
+    rm -rf /tmp/ble-warmup && \
+    echo "BLE+ATARM seed done: $(du -sh /arduino-ble-seed | cut -f1)"
+
 # --- 設定工作目錄 ---
 WORKDIR /app
 
