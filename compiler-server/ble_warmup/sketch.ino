@@ -8,6 +8,11 @@
 //
 // 重要：這裡必須 include 所有可能用到的 library header，
 // 否則對應 library 的 .o 就不會被預先產生。
+//
+// 已知不能共存的互斥 library（各自在獨立使用時沒問題）：
+//   - V7RC_BT vs V7RC_WIFI：共用全域變數 V7RC_A / V7RC_B / numberBase
+//   - ATARM vs PPGUN：共用全域變數 panPin / panDeg
+//   以上兩組選一個代表即可，另一個讓 arduino-cli 在首次使用時編譯。
 // =====================================================
 
 // --- TUBITV2_SET (核心) ---
@@ -25,25 +30,16 @@
 #include <TuOTC.h>
 
 // --- TUBITV2_ATARM (機械手臂) ---
+// 注意：不可與 PPGUN 同時 include（全域變數名稱衝突）
 #include <ATARM.h>
 
-// --- TUBITV2_PPGUN (氣壓砲) ---
-#include <PPGUN.h>
-
-// --- v7rc (藍牙遙控 / WiFi 遙控) ---
+// --- v7rc 藍牙遙控 ---
+// 注意：V7RC_BT 與 V7RC_WIFI 不可同時 include（全域變數名稱衝突），
+// 選用 V7RC_BT，BLE 是最耗時的部分（約 60 秒），暖機效益最大。
 #include <V7RC_BT.h>
-#include <V7RC_WIFI.h>
 
 // --- PS3 (PS3 手把) ---
 #include <Ps3Controller.h>
-
-// --- TUBITV2_OLED (OLED 顯示) ---
-#include <Adafruit_GFX.h>
-#include <Adafruit_SH110X.h>
-#include <U8g2_for_Adafruit_GFX.h>
-#include <eye_anim.h>
-#include <chart_display.h>
-#include <dot_matrix.h>
 
 // --- ESP32Servo (伺服馬達，TUBITV2_SERVOMOTOR 間接使用) ---
 #include <ESP32Servo.h>
@@ -56,7 +52,6 @@ V7RC_BT v7rc;
 TuMTC mtc(tubit);
 TuDTC dtc(tubit);
 TuOTC otc(tubit);
-Adafruit_SH1106G oled(128, 64, &Wire, -1);
 
 void setup() {
   // 核心初始化
@@ -70,11 +65,6 @@ void setup() {
   ATARM_SetLiftRange(0, 65);
   ATARM_SetPanRange(55, 125);
   ATARM_SetClawRange(120, 50);
-
-  // OLED
-  oled.begin(0x3C, true);
-  oled.clearDisplay();
-  oled.display();
 }
 
 void loop() {
@@ -82,8 +72,6 @@ void loop() {
   if (v7rc.connect()) {
     if (v7rc.setMode("SRT")) {
       mtc.driveVectorOpen(0, 0, 0);
-      dtc.drive(0, 0);
-      otc.drive(0, 0, 0);
     }
   }
 }
