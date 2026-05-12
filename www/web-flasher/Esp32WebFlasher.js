@@ -179,12 +179,17 @@ window.Esp32WebFlasher = class {
             throw e;
         } finally {
             // ===== 階段 4：恢復一般模式 =====
+            // 關鍵：無論成功或失敗，都必須先斷開 esptool transport，
+            // 否則 transport 仍持有 port 的讀寫鎖，導致後續 reconnect() 報
+            // "InvalidStateError: The port is already open"。
+            if (esploader && esploader.transport) {
+                try { await esploader.transport.disconnect(); } catch (e) { /* 已斷，忽略 */ }
+            }
+
             if (this.manager) {
                 this.manager.disableFlashingMode();
             }
             // 重新開啟序列埠，讓下次上傳無需按 F5
-            // 使用 reconnect() 而非直接 open()，確保能取得有效的 port
-            // （燒錄過程中 esptool-js 會自行管理 port，結束後 port 狀態可能不一致）
             try {
                 await new Promise(r => setTimeout(r, 500));
                 const ok = await this.manager.reconnect(115200);
