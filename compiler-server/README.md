@@ -1,111 +1,232 @@
-# TubitBlockWebOnline 雲端編譯器與燒錄系統
+# TubitBlock Compiler Server
 
-此專案是基於 TubitBlock 開放原始碼進行重構，加入了「瀏覽器線上編譯」與「Web Serial 直接燒錄」的功能，讓使用者無需額外安裝 `tubitblock-link`，只要打開網頁就能完成 ESP32/Arduino 的開發與燒錄。
+TubitBlock 線上編譯系統的後端伺服器。接收瀏覽器端送來的 Arduino/ESP32 原始碼，呼叫 `arduino-cli` 編譯，將產生的 `.bin` 二進位檔以 Base64 回傳，供前端透過 Web Serial API 直接燒錄至開發板。
 
-## 架構說明
+---
 
-專案分為兩個主要部分：
-1. **Frontend (Web GUI)**: 位於 `www/` 目錄。修改了 `www/web-flasher/LinkIntersector.js`，實作了攔截編譯與快取燒錄二進位檔的邏輯。
-2. **Backend (Compiler Server)**: 位於 `compiler-server/` 目錄。提供一個獨立的 Node.js 編譯 API。
+## 架構總覽
 
-### 使用流程 (5-Phase 重構)
-相較於原始架構，我們完成了以下五階段重構：
-- **Phase 1**: 在前端 GUI 注入「編譯 (線上)」按鈕。
-- **Phase 2**: 打造了獨立的 `compiler-server`，處理 `arduino-cli` 的編譯請求，並使用 UUID 暫存資料夾隔離併發連線。
-- **Phase 3**: 前端連接伺服器，並解決了前端編輯器 (Ace Editor) 挾帶「不換行空白 (NBSP, `\xA0`)」導致 C++ 編譯失敗的問題。
-- **Phase 4**: 實作了「快取機制」。當使用者點擊「上傳」時，如果程式碼沒有更動，系統會直接拿剛剛編譯好的 `.bin` 檔案進行 Web Serial 燒錄，省去重複編譯的時間。
-- **Phase 5**: 最佳化錯誤處理，透過串接 `arduino-cli` 的 `stdout` 與 `stderr`，讓編譯錯誤可以顯示在介面上；並支援 Docker 與區域網路雙模式佈署。
+```text
+瀏覽器 (積木編輯器)
+   │  POST /compile  { code, fqbn }
+   ▼
+compiler-server (Node.js + Express)
+   │  arduino-cli compile
+   ▼
+/tmp/tubitblock-compile/{UUID}/    ← 每個請求獨立隔離
+   ├── sketch/sketch.ino
+   └── build/                      ← 從 seed 複製 + 修補
+       ├── build.options.json      ← 修補 sketchLocation
+       ├── libraries/**/*.o        ← 全部重用（不重編）
+       └── sketch.ino.bin          ← 只重編這一個
+   │
+   ▼ 回傳 flashAddresses + Base64 artifacts
+瀏覽器 Web Serial → ESP32 燒錄
+```
 
-## 編譯伺服器部署方式 (Compiler Server Deployment)
+---
 
-伺服器程式碼位於 `compiler-server/`。目前支援兩種主要部署方式：
+## 核心機制
 
-### 方案 A：區域網路 / 本機佈署 (推薦用於相同 Wi-Fi 的教室環境)
+### Seed Build 暖機（編譯加速關鍵）
 
-如果您有一台電腦（Mac/Windows/Linux/NAS）作為主要伺服器，且學生裝置都在同一個區域網路下。
-此方式編譯速度最快，因為直接使用電腦本機的 CPU 與記憶體（ESP32 編譯峰值需約 1GB RAM）。
+Docker image 建置時，預先編譯一個包含所有 TUBITV2 常用 library 的暖機 sketch（`ble_warmup/sketch.ino`），將產生的 `.o` 目標檔案保存在 `/arduino-ble-seed/`（約 52MB）。
 
-1. 確保本機已安裝 Node.js 與 `arduino-cli` (且已安裝對應核心版，如 `esp32:esp32` 或 `arduino:avr`)。
-2. 在 `compiler-server/` 下執行：
-   ```bash
-   npm install
-   ```
-3. 啟動伺服器：
-   ```bash
-   node server.js
-   ```
-   伺服器預設運行在 Port `3000`。
-4. **修改前端指向**：開啟 `www/web-flasher/LinkIntersector.js`，將 `COMPILE_SERVER_URL` 指向您的伺服器 IP (例如 `http://192.168.1.104:3000/compile`)。
+每次學生編譯流程：
 
-### 方案 B：Docker / 雲端佈署 (適用於完全開放在網際網路)
+1. `cp -a /arduino-ble-seed/ → /tmp/.../build/`（22ms）
+2. 修補 `build.options.json` 的 `sketchLocation` 為本次 sketch 路徑
+3. 修補所有 `.d` 依賴檔案的目標路徑（`sed`）
+4. 執行 `arduino-cli compile`
 
-我們準備了完整的 `Dockerfile`，內建了 `arduino-cli` 與 ESP32 / Arduino AVR 核心版。
-**注意**：請確保您的雲端伺服器 (如 AWS, GCP, Synology NAS) 至少有 **1GB 以上的 RAM**。若使用 Render 免費方案 (512MB RAM)，會在編譯 ESP32 時發生 OOM (Out-of-Memory) 錯誤導致編譯失敗。
+arduino-cli 的增量編譯機制判定所有 library `.o` 皆為最新，只重新編譯 `sketch.ino`。
 
-1. 建置 Docker 映像檔（初次建置約需數分鐘，會下載 300MB 的 ESP32 核心）：
-   ```bash
-   cd compiler-server
-   docker build -t tubitblock-compiler .
-   ```
-2. 啟動 Docker 容器：
-   ```bash
-   docker run -p 3000:3000 tubitblock-compiler
-   ```
-3. 修改前端 `LinkIntersector.js`，將 `COMPILE_SERVER_URL` 指向您對外的網域。
+**實測編譯速度（NAS Docker 環境）：**
 
-## API 端點 (API Endpoints)
+| 程式類型 | 速度 | 說明 |
+| ------- | ---- | ---- |
+| 非 BLE（馬達、感測器等） | ~7s | 極快，幾乎只是 link |
+| BLE（V7RC_BT、PS3） | ~30–55s | 瓶頸為 xtensa linker 掃描 3.1GB archives |
 
-### `GET /` (Health Check)
-回傳伺服器狀態與安裝的核心板資訊，適合用來診斷 `arduino-cli` 是否正常運作。
+> **注意**：BLE linker 是 CPU-bound 的單執行緒瓶頸，OS page cache 暖機與 `--jobs N` 均無法改善。
+
+### 重要限制：`build.options.json` 必須完全一致
+
+arduino-cli 在判斷快取是否有效時，會比對 `build.options.json` 的所有欄位。若 seed build 時的設定與學生編譯時的設定不完全相符，所有 `.o` 都會被視為無效並重編（退化成 90s+）。
+
+**最容易踩坑的地方**：Dockerfile 暖機指令 **不能** 加 `--libraries` 旗標。加了之後 `otherLibrariesFolders` 欄位會被填入明確路徑，與學生編譯（不加 `--libraries`，使用預設目錄）產生差異。Custom libraries 放在 arduino-cli 預設用戶目錄（`/root/Arduino/libraries/`），不需要明確指定。
+
+### 靜態產物快取
+
+server 啟動時，從 seed build 預先讀取 3 個每次都相同的靜態分區檔案到記憶體：
+
+- `sketch.ino.bootloader.bin` → `0x1000`
+- `sketch.ino.partitions.bin` → `0x8000`
+- `boot_app0.bin` → `0xe000`（從 ESP32 core tools/partitions/ 自動注入）
+
+每次編譯回應直接從記憶體夾帶這 3 個檔案，只有 `sketch.ino.bin`（`0x10000`）是每次實際編譯的結果。
+
+### Flash 分區映射
+
+ESP32 正確燒錄需要 4 個分區：
+
+| 地址 | 檔案 | 來源 |
+| ---- | ---- | ---- |
+| `0x01000` | `sketch.ino.bootloader.bin` | arduino-cli 編譯產出（靜態快取） |
+| `0x08000` | `sketch.ino.partitions.bin` | arduino-cli 編譯產出（靜態快取） |
+| `0x0E000` | `boot_app0.bin` | ESP32 core `tools/partitions/`（自動注入） |
+| `0x10000` | `sketch.ino.bin` | 每次編譯的應用程式 |
+
+> `sketch.ino.merged.bin` 與 `.elf` 會被過濾掉，不回傳給前端。
+
+### 並發隔離
+
+每個編譯請求使用獨立 UUID 目錄（`/tmp/tubitblock-compile/{UUID}/`），請求之間完全隔離，支援多個學生同時編譯。
+
+---
+
+## 部署
+
+### 方案 A：Docker（NAS / 雲端，推薦）
+
+```bash
+cd compiler-server
+docker build -t tubitblock-compiler .
+docker run -d --name compiler-server --restart unless-stopped -p 3000:3000 tubitblock-compiler
+```
+
+**系統需求：**
+
+- RAM：至少 2GB（BLE 連結峰值約 1.5GB）
+- 磁碟：映像檔約 3.5GB（含 ESP32 core 3.1.3 + 所有 library）
+- 初次建置時間：約 10–20 分鐘（會下載 ESP32 core 並預編所有 library）
+
+**Synology NAS 重新部署指令：**
+
+```bash
+echo PASSWORD | sudo -S /usr/local/bin/docker stop compiler-server
+echo PASSWORD | sudo -S /usr/local/bin/docker rm compiler-server
+echo PASSWORD | sudo -S /usr/local/bin/docker build -t tubitblock-compiler /volume1/docker/tubitblock/compiler-server/
+echo PASSWORD | sudo -S /usr/local/bin/docker run -d --name compiler-server --restart unless-stopped -p 3000:3000 tubitblock-compiler
+```
+
+### 方案 B：本機直接執行（開發 / 測試用）
+
+```bash
+# 需先安裝：Node.js、arduino-cli（含 esp32:esp32@3.1.3、arduino:avr@1.8.6）
+cd compiler-server
+npm install
+node server.js
+```
+
+首次執行時若缺少 seed build，server 會在背景自動執行暖機編譯（約 3–5 分鐘）。
+
+---
+
+## API
+
+### `GET /`
+
+Health check。回傳伺服器版本、seed build 狀態、已安裝的核心板列表。
 
 ### `POST /compile`
-接收前端程式碼並回傳編譯好的二進位檔。支援兩種請求格式：
 
-**Request Body (Format A):**
+**Request Body：**
 ```json
 {
-  "code": "void setup() {} void loop() {}",
-  "board": "esp32:esp32:esp32",
-  "libraries": "Adafruit_NeoPixel" 
+  "code": "#include <TuBitCore.h>\nvoid setup() {} void loop() {}",
+  "fqbn": "esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default"
 }
 ```
 
-**Response (Success):**
+**Response（成功）：**
 ```json
 {
   "success": true,
-  "buildId": "uuid...",
+  "buildId": "8ca5af44-...",
+  "flashAddresses": {
+    "sketch.ino.bootloader.bin": 4096,
+    "sketch.ino.partitions.bin": 32768,
+    "boot_app0.bin": 57344,
+    "sketch.ino.bin": 65536
+  },
   "artifacts": {
-    "sketch.ino.bin": "Base64字串...",
-    "sketch.ino.elf": "Base64字串..."
+    "sketch.ino.bootloader.bin": "<Base64>",
+    "sketch.ino.partitions.bin": "<Base64>",
+    "boot_app0.bin": "<Base64>",
+    "sketch.ino.bin": "<Base64>"
   }
 }
 ```
 
-**Response (Error):**
-遇到語法錯誤或記憶體耗盡時，會回傳 400，並於 `error` 欄位夾帶完整的 `arduino-cli` 輸出，方便前端呈現給使用者。
+**Response（失敗）：**
+```json
+{
+  "success": false,
+  "buildId": "...",
+  "error": "完整的 arduino-cli 輸出（含語法錯誤訊息）"
+}
+```
 
-## 版本紀錄 (Changelog)
+---
 
-### v1.6.5 (2026-05-12)
+## 目錄結構
 
-#### 編譯加速：Seed Build 暖機機制
+```text
+compiler-server/
+├── server.js              # Express 主程式
+├── Dockerfile             # Docker 建置設定
+├── package.json
+├── ble_warmup/
+│   └── sketch.ino         # 暖機 sketch（含所有 TUBITV2 library）
+└── custom_libraries/      # 自訂函式庫（COPY 至 /root/Arduino/libraries/）
+    ├── TuBitCore/         # libTuBitCore.a（預編譯，針對 esp32:esp32@3.1.3）
+    ├── V7RC_BT/
+    ├── V7RC_WIFI/
+    ├── TuMTC/
+    ├── TuDTC/
+    ├── TuOTC/
+    ├── ATARM/
+    ├── PPGUN/
+    ├── Ps3Controller/
+    ├── ESP32Servo/
+    └── ...（其他擴充 library）
+```
 
-- Docker image build 時預先編譯完整 BLE + TUBITV2 library 組合，產生 seed build (`/arduino-ble-seed/`，約 52MB)
-- 每次學生編譯前：`cp -a /arduino-ble-seed → buildDir`（22ms），修補 `build.options.json` 的 `sketchLocation`，修補 `.d` 依賴路徑
-- arduino-cli 增量編譯判定所有 library `.o` 已是最新（"Using previously compiled file"），只重新編譯 `sketch.ino`
-- 非 BLE 程式碼：~7s；BLE 程式碼：~30-55s（瓶頸為 xtensa-esp-elf-ld 單執行緒掃描 3.1GB archives）
+---
 
-#### 關鍵 Bug 修復
+## 常見問題
 
-- **`build.options.json` 欄位不符（根因修復）**：Dockerfile 暖機指令移除 `--libraries "/root/Arduino/libraries"` 旗標。加了此旗標會讓 seed 的 `otherLibrariesFolders` 欄位與學生編譯不符，導致 arduino-cli 判定設定已變更而重編所有 `.o`（90s）。移除後 seed 與學生編譯的 `build.options.json` 完全一致，增量編譯正常生效。
-- **esptool transport port lock 洩漏**：`Esp32WebFlasher.js` 的 `finally` 區塊加入 `esploader.transport.disconnect()`，確保無論燒錄成功或失敗都先釋放 port 的 reader/writer lock，避免後續重連時報 `InvalidStateError: The port is already open`。
-- **ESP32 core ABI 版本**：Dockerfile 固定使用 `esp32:esp32@3.1.3`，與 `libTuBitCore.a` 的預編譯目標版本一致（舊版 3.1.1 導致 firmware 燒錄後執行時崩潰）。
+### BLE 程式碼編譯超過 60 秒
 
-#### 已確認無效的優化方向（供參考）
+正常現象。ESP32 BLE linker（`xtensa-esp-elf-ld`）需要單執行緒掃描 3.1GB 的 archive 檔案，這是工具鏈的硬性限制。seed build 已消除 library 重編的時間，剩下的全是 linker 時間。
 
-- OS page cache 暖機（`dd` 讀 .a 到記憶體）：測試結果顯示 linker 是 CPU-bound 而非 I/O-bound，無效
-- `arduino-cli --jobs N` 多核心編譯：seed 已預編所有 library，每次只剩 1 個 `.ino` 需編譯，`--jobs` 無法加速；linker 本身單執行緒
+### 編譯突然變回 90 秒
 
-## 授權與貢獻
-本專案為分支重構版本，遵循原 TubitBlock 開源授權。
+seed build 的 `build.options.json` 與學生編譯的設定不符，導致增量編譯失效。最常見原因：
+
+1. Dockerfile warmup 指令多了 `--libraries` 旗標 → 移除
+2. FQBN 與 warmup 使用的不同 → 確認兩者完全一致
+3. Docker image 未重建 → 重新 `docker build`
+
+確認方法：進入容器執行 `cat /arduino-ble-seed/build.options.json`，比對 `otherLibrariesFolders` 欄位是否為 `/root/Arduino/libraries`。
+
+### 燒錄失敗 `InvalidStateError: The port is already open`
+
+esptool-js transport 未正確釋放 port 鎖。`Esp32WebFlasher.js` 的 `finally` 區塊已確保在所有路徑（成功、失敗）下都會呼叫 `esploader.transport.disconnect()`，若仍發生請重新連接序列埠。
+
+### `libTuBitCore.a` 連結錯誤 / firmware 燒錄後崩潰
+
+`libTuBitCore.a` 是針對 `esp32:esp32@3.1.3` 預編譯的靜態庫。若 Docker 使用不同版本的 ESP32 core，會發生 ABI 不符——編譯不報錯，但執行時崩潰。確認 Dockerfile 使用 `esp32:esp32@3.1.3`。
+
+---
+
+## 環境版本
+
+| 元件 | 版本 |
+| ---- | ---- |
+| Node.js | 20 (slim) |
+| arduino-cli | 0.35.3 |
+| ESP32 core | 3.1.3 |
+| Arduino AVR core | 1.8.6 |
+| esptool-js（前端） | 0.5.7 |
