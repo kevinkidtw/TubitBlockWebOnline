@@ -170,7 +170,7 @@ if (bleSeedAvailable) {
  * @param {string} targetBuildDir 目標 build 目錄
  * @returns {boolean} 是否成功複製
  */
-function copySeedBuild(targetBuildDir) {
+function copySeedBuild(targetBuildDir, sketchDir) {
     if (!bleSeedAvailable) return false;
     try {
         const start = Date.now();
@@ -181,7 +181,38 @@ function copySeedBuild(targetBuildDir) {
             execSync(`cp -a "${BLE_SEED_DIR}/." "${targetBuildDir}/"`, { stdio: 'ignore' });
         }
         const elapsed = Date.now() - start;
-        console.log(`[Compile] ✅ Seed build 已複製到 buildDir (${elapsed}ms)`);
+
+        // 修補 build.options.json：把 sketchLocation 換成本次的 sketch 路徑。
+        // 重要：只修改 sketchLocation，其他欄位（如 otherLibrariesFolders）
+        // 必須與 student compile 完全一致，否則 arduino-cli 會認為設定已變更而重編所有 .o。
+        // 這也是為何 Dockerfile 暖機指令不能加 --libraries 旗標：
+        // 加了之後 build.options.json 會多一個 libraries 欄位，與 student compile 不符。
+        const buildOptionsPath = path.join(targetBuildDir, 'build.options.json');
+        if (fs.existsSync(buildOptionsPath) && sketchDir) {
+            try {
+                const opts = JSON.parse(fs.readFileSync(buildOptionsPath, 'utf8'));
+                opts.sketchLocation = sketchDir;
+                fs.writeFileSync(buildOptionsPath, JSON.stringify(opts, null, '  '), 'utf8');
+                console.log(`[Compile] ✅ build.options.json sketchLocation 已修補`);
+            } catch (patchErr) {
+                console.warn(`[Compile] ⚠️ 無法更新 build.options.json: ${patchErr.message}`);
+            }
+        }
+
+        // 修補所有 .d 依賴檔案：把 seed 的舊路徑換成新的 buildDir 路徑。
+        // .d 檔案格式：第一行是 "<target-path>/<file>.o: ..."
+        // arduino-cli 用 target-path 來驗證 .o 是否屬於當前 build，
+        // 若路徑不符就判定快取無效並強制全部重編。
+        try {
+            execSync(
+                `find "${targetBuildDir}" -name "*.d" | xargs sed -i "s|${BLE_SEED_DIR}/|${targetBuildDir}/|g"`,
+                { stdio: 'ignore' }
+            );
+        } catch (sedErr) {
+            console.warn(`[Compile] ⚠️ 修補 .d 檔案失敗（不影響功能，但增量編譯可能失效）: ${sedErr.message}`);
+        }
+
+        console.log(`[Compile] ✅ Seed build 已複製並修補 .d 路徑 (${elapsed}ms)`);
         return true;
     } catch (e) {
         console.warn(`[Compile] ⚠️ 複製 seed build 失敗: ${e.message}`);
@@ -298,7 +329,7 @@ app.post('/compile', async (req, res) => {
         const isEsp32 = boardFqbn.toLowerCase().includes('esp32');
         let seedUsed = false;
         if (isEsp32) {
-            seedUsed = copySeedBuild(buildDir);
+            seedUsed = copySeedBuild(buildDir, sketchDir);
         }
 
         // TubitBlock 產生的程式碼有時會把 #include 放在 setup()/loop() 之後，

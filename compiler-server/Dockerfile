@@ -59,7 +59,6 @@ RUN mkdir -p /arduino-ble-seed /arduino-cache && \
         --fqbn "esp32:esp32:esp32:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=460800,LoopCore=1,EventsCore=1,DebugLevel=none,EraseFlash=none,ZigbeeMode=default" \
         --build-cache-path "/arduino-cache" \
         --build-path "/arduino-ble-seed" \
-        --libraries "/root/Arduino/libraries" \
         /tmp/ble-warmup/sketch && \
     rm -rf /tmp/ble-warmup && \
     echo "BLE+ATARM seed done: $(du -sh /arduino-ble-seed | cut -f1)"
