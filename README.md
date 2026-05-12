@@ -878,7 +878,24 @@ TubitBlockWeb線上編譯版/
 
 ## 十、版本更新紀錄
 
-### v1.6（目前版本）— 2026-04-01
+### v1.6.5（目前版本）— 2026-05-12
+
+#### 編譯加速：Seed Build 暖機機制
+
+- Docker image build 時預先編譯完整 BLE + TUBITV2 library 組合，產生 seed build（`/arduino-ble-seed/`，約 52MB）
+- 每次學生編譯前：`cp -a /arduino-ble-seed → buildDir`（22ms），修補 `build.options.json` 的 `sketchLocation`，修補 `.d` 依賴路徑
+- arduino-cli 增量編譯判定所有 library `.o` 已是最新（"Using previously compiled file"），只重新編譯 `sketch.ino`
+- 非 BLE 程式碼：~7s；BLE 程式碼：~30-55s（瓶頸為 xtensa-esp-elf-ld 單執行緒掃描 3.1GB archives）
+
+#### 關鍵 Bug 修復
+
+- **`build.options.json` 欄位不符（根因修復）**：Dockerfile 暖機指令移除 `--libraries "/root/Arduino/libraries"` 旗標。加了此旗標會讓 seed 的 `otherLibrariesFolders` 欄位與學生編譯不符，導致 arduino-cli 判定設定已變更而重編所有 `.o`（90s）。移除後兩者完全一致，增量編譯正常生效。
+- **esptool transport port lock 洩漏**：`Esp32WebFlasher.js` 的 `finally` 區塊加入 `esploader.transport.disconnect()`，確保無論燒錄成功或失敗都先釋放 port 的 reader/writer lock，避免後續重連時報 `InvalidStateError: The port is already open`。
+- **ESP32 core ABI 版本**：Dockerfile 固定使用 `esp32:esp32@3.1.3`，與 `libTuBitCore.a` 的預編譯目標版本一致（舊版 3.1.1 導致 firmware 燒錄後執行時崩潰）。
+
+---
+
+### v1.6 — 2026-04-01
 
 **問題修復：**
 
