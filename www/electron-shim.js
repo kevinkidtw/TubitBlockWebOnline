@@ -109,8 +109,8 @@
                             name: 'BitTu',
                             bitmapResolution: 2,
                             dataFormat: 'png',
-                            assetId: 'BitTu',
-                            md5ext: 'BitTu.png',
+                            assetId: '732e5c641367f9185529fcd5fe13f801',
+                            md5ext: '732e5c641367f9185529fcd5fe13f801.png',
                             rotationCenterX: 150,
                             rotationCenterY: 150
                         }],
