@@ -41,7 +41,8 @@
             "tubitv2b",
             "tubitv2o",
             "tubitv2m",
-            "tubitv2sm"
+            "tubitv2sm",
+            "tubitv2wifi"
         ],
         "deviceExtensionsCompatible": "arduinoEsp32"
     },

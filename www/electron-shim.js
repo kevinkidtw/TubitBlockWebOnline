@@ -158,10 +158,25 @@
         }
     }, 100);
 
+    // ---- navigator.clipboard polyfill (required for HTTP contexts) ----
+    // navigator.clipboard is undefined outside HTTPS/localhost.
+    // ScratchDesktopGUIHOC.jsx directly assigns to navigator.clipboard.readText
+    // in componentDidMount, crashing the component and causing a blank render.
+    if (!navigator.clipboard) {
+        Object.defineProperty(navigator, 'clipboard', {
+            value: {
+                readText: function () { return Promise.resolve(''); },
+                writeText: function (text) { return Promise.resolve(undefined); }
+            },
+            writable: true,
+            configurable: true
+        });
+        console.log('[TUbitBlock Web] navigator.clipboard polyfill installed (HTTP context).');
+    }
+
     // ---- clipboard shim (use browser clipboard API) ----
     const clipboard = {
         readText: function () {
-            // This will be overridden anyway; provide fallback
             return '';
         },
         writeText: function (text) {

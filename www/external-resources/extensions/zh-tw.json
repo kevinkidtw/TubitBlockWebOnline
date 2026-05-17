@@ -1,5 +1,26 @@
 [
   {
+    "name": "WiFi / IoT",
+    "extensionId": "tubitv2wifi",
+    "iconURL": "extensions/TUBITV2_WIFI/assets/wifi.png",
+    "description": "ESP32 WiFi 連線、HTTP 請求、Google 試算表、MQTT 物聯網積木。",
+    "featured": true,
+    "disabled": false,
+    "collaborator": "HUNG TU 鴻兔科技",
+    "supportDevice": [
+      "arduinoEsp32"
+    ],
+    "blocks": "extensions/TUBITV2_WIFI/blocks.js",
+    "generator": "extensions/TUBITV2_WIFI/generator.js",
+    "toolbox": "extensions/TUBITV2_WIFI/toolbox.js",
+    "translations": "extensions/TUBITV2_WIFI/translations.js",
+    "tags": [
+      "iot",
+      "network",
+      "kit"
+    ]
+  },
+  {
     "name": "tubittask.description",
     "extensionId": "tubittask",
     "iconURL": "extensions/ESP32_TASK/assets/task.png",

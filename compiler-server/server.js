@@ -102,6 +102,31 @@ if (bleSeedAvailable) {
     console.log(`[Boot] ⚠️ BLE seed build 不存在 (${BLE_SEED_DIR})，首次 BLE 編譯將較慢`);
 }
 
+// --- 並發控制 Semaphore ---
+// 60GB RAM，BLE 編譯峰值約 1.5GB，留 8GB 給 OS → 上限 28 個同時編譯
+const MAX_CONCURRENT_COMPILES = 28;
+let activeCompiles = 0;
+const compileQueue = [];
+
+function acquireCompileSlot() {
+    return new Promise(resolve => {
+        if (activeCompiles < MAX_CONCURRENT_COMPILES) {
+            activeCompiles++;
+            resolve();
+        } else {
+            compileQueue.push(resolve);
+        }
+    });
+}
+
+function releaseCompileSlot() {
+    if (compileQueue.length > 0) {
+        compileQueue.shift()();
+    } else {
+        activeCompiles--;
+    }
+}
+
 // --- 靜態產物快取 ---
 // bootloader、partitions、boot_app0.bin 在 FQBN 不變的情況下每次都一樣，
 // 不需要每次編譯後重新收集。在首次成功編譯後快取起來。
@@ -170,15 +195,18 @@ if (bleSeedAvailable) {
  * @param {string} targetBuildDir 目標 build 目錄
  * @returns {boolean} 是否成功複製
  */
-function copySeedBuild(targetBuildDir, sketchDir) {
+async function copySeedBuild(targetBuildDir, sketchDir) {
     if (!bleSeedAvailable) return false;
+    const execAsync = (cmd) => new Promise((resolve, reject) => {
+        exec(cmd, { stdio: 'ignore' }, (err) => err ? reject(err) : resolve());
+    });
     try {
         const start = Date.now();
         if (process.platform === 'win32') {
-            execSync(`xcopy /E /I /Q /Y "${BLE_SEED_DIR}" "${targetBuildDir}"`, { stdio: 'ignore' });
+            await execAsync(`xcopy /E /I /Q /Y "${BLE_SEED_DIR}" "${targetBuildDir}"`);
         } else {
             // cp -a 保留 timestamp（讓 arduino-cli 的增量編譯判斷生效）
-            execSync(`cp -a "${BLE_SEED_DIR}/." "${targetBuildDir}/"`, { stdio: 'ignore' });
+            await execAsync(`cp -a "${BLE_SEED_DIR}/." "${targetBuildDir}/"`);
         }
         const elapsed = Date.now() - start;
 
@@ -204,9 +232,8 @@ function copySeedBuild(targetBuildDir, sketchDir) {
         // arduino-cli 用 target-path 來驗證 .o 是否屬於當前 build，
         // 若路徑不符就判定快取無效並強制全部重編。
         try {
-            execSync(
-                `find "${targetBuildDir}" -name "*.d" | xargs sed -i "s|${BLE_SEED_DIR}/|${targetBuildDir}/|g"`,
-                { stdio: 'ignore' }
+            await execAsync(
+                `find "${targetBuildDir}" -name "*.d" | xargs sed -i "s|${BLE_SEED_DIR}/|${targetBuildDir}/|g"`
             );
         } catch (sedErr) {
             console.warn(`[Compile] ⚠️ 修補 .d 檔案失敗（不影響功能，但增量編譯可能失效）: ${sedErr.message}`);
@@ -239,9 +266,14 @@ app.get('/', async (req, res) => {
     res.json({
         service: 'tubitblock-compiler-server',
         status: 'running',
-        version: '1.1.0',
+        version: '1.3.0',
         arduino_cli: cliVersion,
-        installed_cores: boards
+        installed_cores: boards,
+        concurrency: {
+            active: activeCompiles,
+            queued: compileQueue.length,
+            max: MAX_CONCURRENT_COMPILES
+        }
     });
 });
 
@@ -304,6 +336,12 @@ app.post('/compile', async (req, res) => {
         return res.status(400).json({ success: false, error: '缺少必要參數: board 或 fqbn (硬體版型)' });
     }
 
+    // 等待編譯 slot（並發上限 MAX_CONCURRENT_COMPILES）
+    const queuedAt = Date.now();
+    await acquireCompileSlot();
+    const waitMs = Date.now() - queuedAt;
+    if (waitMs > 500) console.log(`[Compile] 排隊等待 ${waitMs}ms（目前並發：${activeCompiles}/${MAX_CONCURRENT_COMPILES}）`);
+
     const buildId = uuidv4();
     // Windows：os.tmpdir() 可能含中文路徑（如 C:\Users\教師\...），
     // 導致 esp32 core 3.1.x 的 Rust toolchain wrapper 以 ANSI API 解析時 panic（Error code 123）。
@@ -329,7 +367,7 @@ app.post('/compile', async (req, res) => {
         const isEsp32 = boardFqbn.toLowerCase().includes('esp32');
         let seedUsed = false;
         if (isEsp32) {
-            seedUsed = copySeedBuild(buildDir, sketchDir);
+            seedUsed = await copySeedBuild(buildDir, sketchDir);
         }
 
         // TubitBlock 產生的程式碼有時會把 #include 放在 setup()/loop() 之後，
@@ -493,6 +531,7 @@ app.post('/compile', async (req, res) => {
         });
 
     } finally {
+        releaseCompileSlot();
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
     }
 });
