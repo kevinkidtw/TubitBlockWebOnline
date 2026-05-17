@@ -22,6 +22,16 @@ function registerToolboxs () {
 
     </category>
 
+    <category name="%{BKY_TUBITV2WIFI_CATEGORY_NTP}" id="TUBITV2WIFI_CATEGORY_NTP" colour="#1565C0" secondaryColour="#1565C0" iconURI="../external-resources/extensions/TUBITV2_WIFI/assets/wifi.png">
+
+      <block type="tubitv2wifi_ntpSetup" id="tubitv2wifi_ntpSetup"/>
+
+      <block type="tubitv2wifi_getTime" id="tubitv2wifi_getTime"/>
+
+      <block type="tubitv2wifi_getDate" id="tubitv2wifi_getDate"/>
+
+    </category>
+
     <category name="%{BKY_TUBITV2WIFI_CATEGORY_HTTP}" id="TUBITV2WIFI_CATEGORY_HTTP" colour="#00838F" secondaryColour="#00838F" iconURI="../external-resources/extensions/TUBITV2_WIFI/assets/wifi.png">
 
       <block type="tubitv2wifi_httpGet" id="tubitv2wifi_httpGet">
@@ -66,6 +76,21 @@ function registerToolboxs () {
         </value>
       </block>
 
+      <block type="tubitv2wifi_sheetsWriteRow" id="tubitv2wifi_sheetsWriteRow">
+        <value name="VALUE1">
+          <shadow type="text"><field name="TEXT">25.3</field></shadow>
+        </value>
+        <value name="VALUE2">
+          <shadow type="text"><field name="TEXT">65</field></shadow>
+        </value>
+        <value name="VALUE3">
+          <shadow type="text"><field name="TEXT">0</field></shadow>
+        </value>
+        <value name="VALUE4">
+          <shadow type="text"><field name="TEXT">0</field></shadow>
+        </value>
+      </block>
+
     </category>
 
     <category name="%{BKY_TUBITV2WIFI_CATEGORY_MQTT}" id="TUBITV2WIFI_CATEGORY_MQTT" colour="#E65100" secondaryColour="#E65100" iconURI="../external-resources/extensions/TUBITV2_WIFI/assets/wifi.png">
@@ -105,6 +130,43 @@ function registerToolboxs () {
       <block type="tubitv2wifi_mqttLoop" id="tubitv2wifi_mqttLoop"/>
 
       <block type="tubitv2wifi_mqttLastMessage" id="tubitv2wifi_mqttLastMessage"/>
+
+    </category>
+
+    <category name="%{BKY_TUBITV2WIFI_CATEGORY_TS}" id="TUBITV2WIFI_CATEGORY_TS" colour="#7B1FA2" secondaryColour="#7B1FA2" iconURI="../external-resources/extensions/TUBITV2_WIFI/assets/wifi.png">
+
+      <block type="tubitv2wifi_thingspeakSetup" id="tubitv2wifi_thingspeakSetup">
+        <value name="WRITE_KEY">
+          <shadow type="text"><field name="TEXT">YOUR_WRITE_KEY</field></shadow>
+        </value>
+      </block>
+
+      <block type="tubitv2wifi_thingspeakWrite" id="tubitv2wifi_thingspeakWrite">
+        <value name="F1">
+          <shadow type="math_number"><field name="NUM">0</field></shadow>
+        </value>
+        <value name="F2">
+          <shadow type="math_number"><field name="NUM">0</field></shadow>
+        </value>
+        <value name="F3">
+          <shadow type="math_number"><field name="NUM">0</field></shadow>
+        </value>
+        <value name="F4">
+          <shadow type="math_number"><field name="NUM">0</field></shadow>
+        </value>
+      </block>
+
+      <block type="tubitv2wifi_thingspeakRead" id="tubitv2wifi_thingspeakRead">
+        <value name="CHANNEL_ID">
+          <shadow type="text"><field name="TEXT">123456</field></shadow>
+        </value>
+        <value name="READ_KEY">
+          <shadow type="text"><field name="TEXT">YOUR_READ_KEY</field></shadow>
+        </value>
+        <value name="FIELD_NO">
+          <shadow type="math_number"><field name="NUM">1</field></shadow>
+        </value>
+      </block>
 
     </category>`;
 }

@@ -30,6 +30,36 @@ function registerGenerators (Blockly) {
         return ['WiFi.localIP().toString()', Blockly.Arduino.ORDER_ATOMIC];
     };
 
+    Blockly.Arduino.tubitv2wifi_ntpSetup = function () {
+        Blockly.Arduino.definitions_['include_time'] = '#include <time.h>';
+        return (
+            `configTime(28800, 0, "pool.ntp.org", "time.nist.gov");\n` +
+            `while (time(nullptr) < 1000000000) { delay(100); }\n`
+        );
+    };
+
+    Blockly.Arduino.tubitv2wifi_getTime = function () {
+        Blockly.Arduino.definitions_['include_time'] = '#include <time.h>';
+        Blockly.Arduino.definitions_['fn_ntpGetTime'] =
+            `String _ntpGetTime() {\n` +
+            `  char buf[10]; time_t now = time(nullptr); struct tm* t = localtime(&now);\n` +
+            `  sprintf(buf, "%02d:%02d:%02d", t->tm_hour, t->tm_min, t->tm_sec);\n` +
+            `  return String(buf);\n` +
+            `}`;
+        return ['_ntpGetTime()', Blockly.Arduino.ORDER_ATOMIC];
+    };
+
+    Blockly.Arduino.tubitv2wifi_getDate = function () {
+        Blockly.Arduino.definitions_['include_time'] = '#include <time.h>';
+        Blockly.Arduino.definitions_['fn_ntpGetDate'] =
+            `String _ntpGetDate() {\n` +
+            `  char buf[12]; time_t now = time(nullptr); struct tm* t = localtime(&now);\n` +
+            `  sprintf(buf, "%04d-%02d-%02d", t->tm_year+1900, t->tm_mon+1, t->tm_mday);\n` +
+            `  return String(buf);\n` +
+            `}`;
+        return ['_ntpGetDate()', Blockly.Arduino.ORDER_ATOMIC];
+    };
+
     // ── HTTP ──────────────────────────────────────────────────────────────
 
     Blockly.Arduino.tubitv2wifi_httpGet = function (block) {
@@ -104,6 +134,31 @@ function registerGenerators (Blockly) {
             `  _http.addHeader("Content-Type", "application/x-www-form-urlencoded");\n` +
             `  String _payload = "field=" + String(${field}) + "&value=" + String(${value});\n` +
             `  int _code = _http.POST(_payload);\n` +
+            `  if (_code > 0) { _http_response = _http.getString(); }\n` +
+            `  _http.end();\n` +
+            `}\n`
+        );
+    };
+
+    Blockly.Arduino.tubitv2wifi_sheetsWriteRow = function (block) {
+        const v1 = Blockly.Arduino.valueToCode(block, 'VALUE1', Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const v2 = Blockly.Arduino.valueToCode(block, 'VALUE2', Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const v3 = Blockly.Arduino.valueToCode(block, 'VALUE3', Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const v4 = Blockly.Arduino.valueToCode(block, 'VALUE4', Blockly.Arduino.ORDER_ATOMIC) || '""';
+
+        Blockly.Arduino.definitions_['include_HTTPClient'] = '#include <HTTPClient.h>';
+        Blockly.Arduino.definitions_['wifi_globals'] =
+            Blockly.Arduino.definitions_['wifi_globals'] ||
+            `char _wifi_ssid[64];\nchar _wifi_pass[64];\nString _http_response = "";\nString _sheets_url = "";`;
+
+        return (
+            `{\n` +
+            `  HTTPClient _http;\n` +
+            `  _http.begin(_sheets_url);\n` +
+            `  _http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);\n` +
+            `  _http.addHeader("Content-Type", "application/x-www-form-urlencoded");\n` +
+            `  String _row = "f1=" + String(${v1}) + "&f2=" + String(${v2}) + "&f3=" + String(${v3}) + "&f4=" + String(${v4});\n` +
+            `  int _code = _http.POST(_row);\n` +
             `  if (_code > 0) { _http_response = _http.getString(); }\n` +
             `  _http.end();\n` +
             `}\n`
@@ -206,6 +261,71 @@ function registerGenerators (Blockly) {
 
     Blockly.Arduino.tubitv2wifi_mqttLastMessage = function () {
         return ['_mqtt_last_msg', Blockly.Arduino.ORDER_ATOMIC];
+    };
+
+    // ── ThingSpeak ────────────────────────────────────────────────────────
+
+    Blockly.Arduino.tubitv2wifi_thingspeakSetup = function (block) {
+        const key = Blockly.Arduino.valueToCode(block, 'WRITE_KEY', Blockly.Arduino.ORDER_ATOMIC) || '""';
+
+        Blockly.Arduino.definitions_['include_HTTPClient'] = '#include <HTTPClient.h>';
+        Blockly.Arduino.definitions_['ts_globals'] = `String _ts_write_key = "";`;
+
+        return `_ts_write_key = ${key};\n`;
+    };
+
+    Blockly.Arduino.tubitv2wifi_thingspeakWrite = function (block) {
+        const f1 = Blockly.Arduino.valueToCode(block, 'F1', Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const f2 = Blockly.Arduino.valueToCode(block, 'F2', Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const f3 = Blockly.Arduino.valueToCode(block, 'F3', Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const f4 = Blockly.Arduino.valueToCode(block, 'F4', Blockly.Arduino.ORDER_ATOMIC) || '""';
+
+        Blockly.Arduino.definitions_['include_HTTPClient'] = '#include <HTTPClient.h>';
+        Blockly.Arduino.definitions_['ts_globals'] =
+            Blockly.Arduino.definitions_['ts_globals'] || `String _ts_write_key = "";`;
+
+        return (
+            `{\n` +
+            `  HTTPClient _http;\n` +
+            `  _http.begin("https://api.thingspeak.com/update");\n` +
+            `  _http.addHeader("Content-Type", "application/x-www-form-urlencoded");\n` +
+            `  String _body = "api_key=" + _ts_write_key +\n` +
+            `    "&field1=" + String(${f1}) + "&field2=" + String(${f2}) +\n` +
+            `    "&field3=" + String(${f3}) + "&field4=" + String(${f4});\n` +
+            `  _http.POST(_body);\n` +
+            `  _http.end();\n` +
+            `}\n`
+        );
+    };
+
+    Blockly.Arduino.tubitv2wifi_thingspeakRead = function (block) {
+        const channelId = Blockly.Arduino.valueToCode(block, 'CHANNEL_ID', Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const readKey   = Blockly.Arduino.valueToCode(block, 'READ_KEY',   Blockly.Arduino.ORDER_ATOMIC) || '""';
+        const fieldNo   = Blockly.Arduino.valueToCode(block, 'FIELD_NO',   Blockly.Arduino.ORDER_ATOMIC) || '1';
+
+        Blockly.Arduino.definitions_['include_HTTPClient'] = '#include <HTTPClient.h>';
+        Blockly.Arduino.definitions_['fn_thingspeakRead'] =
+            `String _thingspeakRead(String cid, String key, int fn) {\n` +
+            `  HTTPClient _h;\n` +
+            `  _h.begin("https://api.thingspeak.com/channels/" + cid + "/feeds/last.json?api_key=" + key);\n` +
+            `  _h.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);\n` +
+            `  int code = _h.GET();\n` +
+            `  String result = "";\n` +
+            `  if (code > 0) {\n` +
+            `    String body = _h.getString();\n` +
+            `    String fk = "\\"field" + String(fn) + "\\":\\""; \n` +
+            `    int vi = body.indexOf(fk);\n` +
+            `    if (vi >= 0) {\n` +
+            `      int s = vi + fk.length();\n` +
+            `      int e = body.indexOf('"', s);\n` +
+            `      if (e > s) result = body.substring(s, e);\n` +
+            `    }\n` +
+            `  }\n` +
+            `  _h.end();\n` +
+            `  return result;\n` +
+            `}`;
+
+        return [`_thingspeakRead(${channelId}, ${readKey}, ${fieldNo})`, Blockly.Arduino.ORDER_ATOMIC];
     };
 
     return Blockly;

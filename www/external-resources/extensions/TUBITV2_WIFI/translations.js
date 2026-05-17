@@ -9,15 +9,15 @@ function getInterfaceTranslations () {
     return {
         "en": {
             "tubitv2wifi.name": "WiFi / IoT",
-            "tubitv2wifi.description": "ESP32 WiFi, HTTP, Google Sheets, MQTT IoT blocks."
+            "tubitv2wifi.description": "ESP32 WiFi, HTTP, NTP time, Google Sheets, ThingSpeak, MQTT IoT blocks."
         },
         "zh-cn": {
             "tubitv2wifi.name": "WiFi / IoT",
-            "tubitv2wifi.description": "ESP32 WiFi连线、HTTP请求、Google表格、MQTT物联网积木。"
+            "tubitv2wifi.description": "ESP32 WiFi连线、HTTP请求、NTP网络时间、Google表格、ThingSpeak、MQTT物联网积木。"
         },
         "zh-tw": {
             "tubitv2wifi.name": "WiFi / IoT",
-            "tubitv2wifi.description": "ESP32 WiFi 連線、HTTP 請求、Google 試算表、MQTT 物聯網積木。"
+            "tubitv2wifi.description": "ESP32 WiFi 連線、HTTP 請求、NTP 網路時間、Google 試算表、ThingSpeak、MQTT 物聯網積木。"
         }
     };
 }
@@ -53,7 +53,19 @@ function registerBlocksMessages (Blockly) {
         "TUBITV2WIFI_MQTT_SUBSCRIBE":   "subscribe topic %1",
         "TUBITV2WIFI_MQTT_IS_CONNECTED":"MQTT connected?",
         "TUBITV2WIFI_MQTT_LOOP":        "MQTT keep alive (run in loop)",
-        "TUBITV2WIFI_MQTT_LAST_MSG":    "last MQTT message"
+        "TUBITV2WIFI_MQTT_LAST_MSG":    "last MQTT message",
+
+        "TUBITV2WIFI_CATEGORY_NTP":     "NTP Time",
+        "TUBITV2WIFI_NTP_SETUP":        "sync NTP time (Taiwan UTC+8)",
+        "TUBITV2WIFI_GET_TIME":         "get time HH:MM:SS",
+        "TUBITV2WIFI_GET_DATE":         "get date YYYY-MM-DD",
+
+        "TUBITV2WIFI_SHEETS_WRITE_ROW": "write row col1 %1 col2 %2 col3 %3 col4 %4",
+
+        "TUBITV2WIFI_CATEGORY_TS":      "ThingSpeak",
+        "TUBITV2WIFI_TS_SETUP":         "set ThingSpeak Write Key %1",
+        "TUBITV2WIFI_TS_WRITE":         "upload field1=%1 field2=%2 field3=%3 field4=%4",
+        "TUBITV2WIFI_TS_READ":          "read channel %1 ReadKey %2 field %3"
     });
 
     Object.assign(Blockly.ScratchMsgs.locales["zh-cn"], {
@@ -81,7 +93,19 @@ function registerBlocksMessages (Blockly) {
         "TUBITV2WIFI_MQTT_SUBSCRIBE":   "订阅 主题 %1",
         "TUBITV2WIFI_MQTT_IS_CONNECTED":"MQTT 已连线？",
         "TUBITV2WIFI_MQTT_LOOP":        "MQTT 持续运行（放在重复执行中）",
-        "TUBITV2WIFI_MQTT_LAST_MSG":    "最后收到的 MQTT 讯息"
+        "TUBITV2WIFI_MQTT_LAST_MSG":    "最后收到的 MQTT 讯息",
+
+        "TUBITV2WIFI_CATEGORY_NTP":     "网络时间",
+        "TUBITV2WIFI_NTP_SETUP":        "同步网络时间（台湾 UTC+8）",
+        "TUBITV2WIFI_GET_TIME":         "取得时间 HH:MM:SS",
+        "TUBITV2WIFI_GET_DATE":         "取得日期 YYYY-MM-DD",
+
+        "TUBITV2WIFI_SHEETS_WRITE_ROW": "写入一行资料 第1欄 %1 第2欄 %2 第3欄 %3 第4欄 %4",
+
+        "TUBITV2WIFI_CATEGORY_TS":      "ThingSpeak",
+        "TUBITV2WIFI_TS_SETUP":         "设定 ThingSpeak Write Key %1",
+        "TUBITV2WIFI_TS_WRITE":         "上传 field1=%1 field2=%2 field3=%3 field4=%4",
+        "TUBITV2WIFI_TS_READ":          "读取频道 %1 ReadKey %2 第 %3 欄位"
     });
 
     Object.assign(Blockly.ScratchMsgs.locales["zh-tw"], {
@@ -109,7 +133,19 @@ function registerBlocksMessages (Blockly) {
         "TUBITV2WIFI_MQTT_SUBSCRIBE":   "訂閱 主題 %1",
         "TUBITV2WIFI_MQTT_IS_CONNECTED":"MQTT 已連線？",
         "TUBITV2WIFI_MQTT_LOOP":        "MQTT 持續運行（放在重複執行中）",
-        "TUBITV2WIFI_MQTT_LAST_MSG":    "最後收到的 MQTT 訊息"
+        "TUBITV2WIFI_MQTT_LAST_MSG":    "最後收到的 MQTT 訊息",
+
+        "TUBITV2WIFI_CATEGORY_NTP":     "網路時間",
+        "TUBITV2WIFI_NTP_SETUP":        "同步網路時間（台灣 UTC+8）",
+        "TUBITV2WIFI_GET_TIME":         "取得時間 HH:MM:SS",
+        "TUBITV2WIFI_GET_DATE":         "取得日期 YYYY-MM-DD",
+
+        "TUBITV2WIFI_SHEETS_WRITE_ROW": "寫入一行資料 第1欄 %1 第2欄 %2 第3欄 %3 第4欄 %4",
+
+        "TUBITV2WIFI_CATEGORY_TS":      "ThingSpeak",
+        "TUBITV2WIFI_TS_SETUP":         "設定 ThingSpeak Write Key %1",
+        "TUBITV2WIFI_TS_WRITE":         "上傳 field1=%1 field2=%2 field3=%3 field4=%4",
+        "TUBITV2WIFI_TS_READ":          "讀取頻道 %1 ReadKey %2 第 %3 欄位"
     });
 
     return Blockly;
